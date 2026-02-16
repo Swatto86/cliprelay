@@ -43,6 +43,7 @@ mod windows_client {
     use tracing::{error, info, warn};
     use tracing_subscriber::fmt::MakeWriter;
     use url::Url;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
 
     use cliprelay_client::autostart;
 
@@ -950,6 +951,12 @@ mod windows_client {
             self.send_window.set_position(x, y);
             self.send_window.set_visible(true);
             self.send_window.set_focus();
+
+            // Bring window to foreground using Win32 API
+            unsafe {
+                let hwnd = self.send_window.handle.hwnd().unwrap();
+                SetForegroundWindow(hwnd as isize);
+            }
         }
 
         fn open_options_window(&self) {
@@ -1444,6 +1451,8 @@ mod windows_client {
             button_cancel: nwg::Button,
         }
 
+        let icon_app = nwg::Icon::from_bin(APP_ICON_BYTES).map_err(|err| err.to_string())?;
+
         let mut window = nwg::Window::default();
         let mut label_title = nwg::Label::default();
         let mut label_info = nwg::Label::default();
@@ -1462,6 +1471,7 @@ mod windows_client {
             .size((width, height))
             .position((x, y))
             .title("ClipRelay - Choose Room")
+            .icon(Some(&icon_app))
             .build(&mut window)
             .map_err(|err| err.to_string())?;
 
@@ -1610,6 +1620,8 @@ mod windows_client {
             button_cancel: nwg::Button,
         }
 
+        let icon_app = nwg::Icon::from_bin(APP_ICON_BYTES).map_err(|err| err.to_string())?;
+
         let mut window = nwg::Window::default();
         let mut label_welcome = nwg::Label::default();
         let mut label_room = nwg::Label::default();
@@ -1632,6 +1644,7 @@ mod windows_client {
             .size((width, height))
             .position((x, y))
             .title("ClipRelay - Setup")
+            .icon(Some(&icon_app))
             .build(&mut window)
             .map_err(|err| err.to_string())?;
 
