@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use cliprelay_client::ui_state::{
-    clamp_placement_in_rect, load_ui_state_from_path, WindowPlacement, MAX_UI_STATE_BYTES,
+    MAX_UI_STATE_BYTES, WindowPlacement, clamp_placement_in_rect, load_ui_state_from_path,
 };
 
 #[test]

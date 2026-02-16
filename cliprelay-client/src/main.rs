@@ -44,11 +44,12 @@ mod windows_client {
     use tracing_subscriber::fmt::MakeWriter;
     use url::Url;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE,
+        HWND_NOTOPMOST, HWND_TOPMOST, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
         SetForegroundWindow, SetWindowPos, ShowWindow,
     };
 
     use cliprelay_client::autostart;
+    use cliprelay_client::ui_layout;
     use cliprelay_client::ui_state::{self, SavedUiState, WindowPlacement};
 
     #[derive(Clone)]
@@ -243,7 +244,8 @@ mod windows_client {
         let path = history_path();
         let tmp = path.with_extension("json.tmp");
 
-        let entries: Vec<ActivityEntry> = history.iter().take(MAX_HISTORY_ENTRIES).cloned().collect();
+        let entries: Vec<ActivityEntry> =
+            history.iter().take(MAX_HISTORY_ENTRIES).cloned().collect();
         let Ok(payload) = serde_json::to_string_pretty(&entries) else {
             return;
         };
@@ -255,8 +257,9 @@ mod windows_client {
                 if path.exists() {
                     let _ = std::fs::remove_file(&path);
                 }
-                std::fs::rename(&tmp, &path)
-                    .map_err(|e| format!("failed to move history into place {}: {e}", path.display()))?;
+                std::fs::rename(&tmp, &path).map_err(|e| {
+                    format!("failed to move history into place {}: {e}", path.display())
+                })?;
                 Ok(())
             })();
 
@@ -403,13 +406,7 @@ mod windows_client {
             min_h: u32,
             rect: [i32; 4],
         ) -> WindowPlacement {
-            ui_state::clamp_placement_in_rect(
-                placement,
-                min_w,
-                min_h,
-                scale_px(16),
-                rect,
-            )
+            ui_state::clamp_placement_in_rect(placement, min_w, min_h, scale_px(16), rect)
         }
 
         fn clamp_placement_for_window(
@@ -477,12 +474,12 @@ mod windows_client {
         }
 
         fn restore_options_window_placement(&self) {
-            let min_w = scale_px(440) as u32;
-            let min_h = scale_px(320) as u32;
+            let min_w = scale_px(ui_layout::OPTIONS_MIN_W_PX) as u32;
+            let min_h = scale_px(ui_layout::OPTIONS_MIN_H_PX) as u32;
 
             let placement = self.ui_state.options.unwrap_or_else(|| {
-                let w = scale_px(520) as u32;
-                let h = scale_px(380) as u32;
+                let w = scale_px(ui_layout::OPTIONS_DEFAULT_W_PX) as u32;
+                let h = scale_px(ui_layout::OPTIONS_DEFAULT_H_PX) as u32;
                 let x = (nwg::Monitor::width() - w as i32) / 2;
                 let y = (nwg::Monitor::height() - h as i32) / 2;
                 WindowPlacement { x, y, w, h }
@@ -515,8 +512,7 @@ mod windows_client {
             let btn_h = scale_px(36);
             let btn_w = scale_px(180);
 
-            self.send_status_label
-                .set_position(margin, margin);
+            self.send_status_label.set_position(margin, margin);
             self.send_status_label
                 .set_size((w - margin * 2).max(scale_px(100)) as u32, status_h as u32);
 
@@ -527,13 +523,11 @@ mod windows_client {
             self.send_text_box
                 .set_size((w - margin * 2).max(scale_px(120)) as u32, text_h as u32);
 
-            self.send_button
-                .set_position(margin, buttons_top);
+            self.send_button.set_position(margin, buttons_top);
             self.send_button.set_size(btn_w as u32, btn_h as u32);
 
             let file_x = (w - margin - btn_w).max(margin);
-            self.send_file_button
-                .set_position(file_x, buttons_top);
+            self.send_file_button.set_position(file_x, buttons_top);
             self.send_file_button.set_size(btn_w as u32, btn_h as u32);
         }
 
@@ -560,26 +554,26 @@ mod windows_client {
                 .set_size((w - margin * 2).max(scale_px(120)) as u32, info_h as u32);
 
             let cb1_y = info_top + info_h + gap;
-            self.options_auto_apply_checkbox
-                .set_position(margin, cb1_y);
-            self.options_auto_apply_checkbox
-                .set_size((w - margin * 2).max(scale_px(120)) as u32, checkbox_h as u32);
+            self.options_auto_apply_checkbox.set_position(margin, cb1_y);
+            self.options_auto_apply_checkbox.set_size(
+                (w - margin * 2).max(scale_px(120)) as u32,
+                checkbox_h as u32,
+            );
 
             let cb2_y = cb1_y + checkbox_h + gap;
-            self.options_autostart_checkbox
-                .set_position(margin, cb2_y);
-            self.options_autostart_checkbox
-                .set_size((w - margin * 2).max(scale_px(120)) as u32, checkbox_h as u32);
+            self.options_autostart_checkbox.set_position(margin, cb2_y);
+            self.options_autostart_checkbox.set_size(
+                (w - margin * 2).max(scale_px(120)) as u32,
+                checkbox_h as u32,
+            );
 
             let err_y = cb2_y + checkbox_h + gap;
-            self.options_error_label
-                .set_position(margin, err_y);
+            self.options_error_label.set_position(margin, err_y);
             self.options_error_label
                 .set_size((w - margin * 2).max(scale_px(120)) as u32, error_h as u32);
 
             let close_x = (w - margin - close_w).max(margin);
-            self.options_close_button
-                .set_position(close_x, close_top);
+            self.options_close_button.set_position(close_x, close_top);
             self.options_close_button
                 .set_size(close_w as u32, btn_h as u32);
         }
@@ -596,8 +590,7 @@ mod windows_client {
             let btn_w_left = scale_px(220);
             let btn_w_right = scale_px(180);
 
-            self.popup_sender_label
-                .set_position(margin, margin);
+            self.popup_sender_label.set_position(margin, margin);
             self.popup_sender_label
                 .set_size((w - margin * 2).max(scale_px(120)) as u32, label_h as u32);
 
@@ -608,8 +601,7 @@ mod windows_client {
             self.popup_text_box
                 .set_size((w - margin * 2).max(scale_px(120)) as u32, text_h as u32);
 
-            self.popup_apply_button
-                .set_position(margin, buttons_top);
+            self.popup_apply_button.set_position(margin, buttons_top);
             self.popup_apply_button
                 .set_size(btn_w_left as u32, btn_h as u32);
 
@@ -737,7 +729,11 @@ mod windows_client {
             nwg::TextBox::builder()
                 .position((scale_px(16), scale_px(46)))
                 .size((send_width - scale_px(32), scale_px(230)))
-                .flags(nwg::TextBoxFlags::TAB_STOP | nwg::TextBoxFlags::VISIBLE | nwg::TextBoxFlags::AUTOVSCROLL)
+                .flags(
+                    nwg::TextBoxFlags::TAB_STOP
+                        | nwg::TextBoxFlags::VISIBLE
+                        | nwg::TextBoxFlags::AUTOVSCROLL,
+                )
                 .focus(true)
                 .parent(&send_window)
                 .build(&mut send_text_box)
@@ -759,8 +755,8 @@ mod windows_client {
                 .build(&mut send_file_button)
                 .map_err(|err| err.to_string())?;
 
-            let options_width = scale_px(520);
-            let options_height = scale_px(380);
+            let options_width = scale_px(ui_layout::OPTIONS_DEFAULT_W_PX);
+            let options_height = scale_px(ui_layout::OPTIONS_DEFAULT_H_PX);
             let options_x = (nwg::Monitor::width() - options_width) / 2;
             let options_y = (nwg::Monitor::height() - options_height) / 2;
 
@@ -777,7 +773,7 @@ mod windows_client {
             nwg::TextBox::builder()
                 .position((scale_px(16), scale_px(14)))
                 .size((options_width - scale_px(32), scale_px(210)))
-                .flags(nwg::TextBoxFlags::VISIBLE | nwg::TextBoxFlags::AUTOVSCROLL)
+                .flags(ui_layout::options_info_box_flags())
                 .readonly(true)
                 .parent(&options_window)
                 .build(&mut options_info_box)
@@ -1764,9 +1760,7 @@ mod windows_client {
                 warn!("saved config invalid; will prompt for new setup: {}", err);
                 nwg::simple_message(
                     "ClipRelay",
-                    &format!(
-                        "Saved config was invalid and will be replaced after setup.\n\n{err}"
-                    ),
+                    &format!("Saved config was invalid and will be replaced after setup.\n\n{err}"),
                 );
                 None
             }
@@ -1961,8 +1955,12 @@ mod windows_client {
         let mut button_cancel = nwg::Button::default();
 
         let has_saved = saved_config.is_some();
-        let width = scale_px(440);
-        let height = if has_saved { scale_px(220) } else { scale_px(160) };
+        let width = scale_px(ui_layout::CHOOSE_ROOM_DEFAULT_W_PX);
+        let height = if has_saved {
+            scale_px(ui_layout::CHOOSE_ROOM_HAS_SAVED_H_PX)
+        } else {
+            scale_px(ui_layout::CHOOSE_ROOM_NO_SAVED_H_PX)
+        };
         let x = (nwg::Monitor::width() - width) / 2;
         let y = (nwg::Monitor::height() - height) / 2;
 
@@ -1992,52 +1990,67 @@ mod windows_client {
             "Setup a new room to start syncing files/text".to_string()
         };
 
-        let info_height = if has_saved { scale_px(100) } else { scale_px(40) };
+        // Layout: compute the info label height from the available space so text doesn't get
+        // clipped on high-DPI / 150% scaling.
+        let margin = scale_px(16);
+        let gap = scale_px(10);
+        let title_top = scale_px(14);
+        let title_h = scale_px(24);
+        let info_top = title_top + title_h + gap;
+        let btn_top = height - scale_px(52);
+        let info_h = (btn_top - gap - info_top).max(scale_px(48));
+
         nwg::Label::builder()
             .text(&info_text)
-            .position((scale_px(16), scale_px(48)))
-            .size((width - scale_px(32), info_height))
+            .position((margin, info_top))
+            .size((width - margin * 2, info_h))
             .parent(&window)
             .build(&mut label_info)
             .map_err(|err| err.to_string())?;
 
         if has_saved {
+            let btn_h = scale_px(34);
+            let btn_w = ((width - margin * 2 - gap * 2) / 3).max(scale_px(120));
+
             nwg::Button::builder()
                 .text("Use Saved Room")
-                .position((scale_px(16), height - scale_px(52)))
-                .size((scale_px(140), scale_px(34)))
+                .position((margin, btn_top))
+                .size((btn_w, btn_h))
                 .parent(&window)
                 .build(&mut button_use_saved)
                 .map_err(|err| err.to_string())?;
 
             nwg::Button::builder()
                 .text("Setup New Room")
-                .position((scale_px(164), height - scale_px(52)))
-                .size((scale_px(140), scale_px(34)))
+                .position((margin + btn_w + gap, btn_top))
+                .size((btn_w, btn_h))
                 .parent(&window)
                 .build(&mut button_setup_new)
                 .map_err(|err| err.to_string())?;
 
             nwg::Button::builder()
                 .text("Cancel")
-                .position((width - scale_px(114), height - scale_px(52)))
-                .size((scale_px(98), scale_px(34)))
+                .position((margin + (btn_w + gap) * 2, btn_top))
+                .size((btn_w, btn_h))
                 .parent(&window)
                 .build(&mut button_cancel)
                 .map_err(|err| err.to_string())?;
         } else {
+            let btn_h = scale_px(34);
+            let btn_w = ((width - margin * 2 - gap) / 2).max(scale_px(140));
+
             nwg::Button::builder()
                 .text("Setup New Room")
-                .position((scale_px(16), height - scale_px(52)))
-                .size((scale_px(170), scale_px(34)))
+                .position((margin, btn_top))
+                .size((btn_w, btn_h))
                 .parent(&window)
                 .build(&mut button_setup_new)
                 .map_err(|err| err.to_string())?;
 
             nwg::Button::builder()
                 .text("Cancel")
-                .position((width - scale_px(114), height - scale_px(52)))
-                .size((scale_px(98), scale_px(34)))
+                .position((margin + btn_w + gap, btn_top))
+                .size((btn_w, btn_h))
                 .parent(&window)
                 .build(&mut button_cancel)
                 .map_err(|err| err.to_string())?;
@@ -2327,8 +2340,9 @@ mod windows_client {
                 server_url: "ws://127.0.0.1:1/ws".to_string(),
                 room_code: room_code.to_string(),
                 device_name: "TestDevice".to_string(),
-                device_id: stable_device_id(),
+                device_id: stable_device_id("TestDevice"),
                 background: false,
+                initial_counter: 0,
             };
 
             let app = ClipRelayTrayApp::build(cfg).expect("build tray app");
@@ -2418,6 +2432,7 @@ mod windows_client {
                     device_id: "local".to_string(),
                     device_name: "local".to_string(),
                     background: false,
+                    initial_counter: 0,
                 },
                 &std::sync::mpsc::channel().0,
                 sender,
@@ -2452,16 +2467,60 @@ mod windows_client {
     }
 
     fn init_logging() {
-        let env_filter = tracing_subscriber::EnvFilter::from_default_env();
+        const MAX_ATTEMPTS: u32 = 3;
+        const BACKOFF_BASE_MS: u64 = 50;
 
-        let log_path = client_log_path();
-        let file = match OpenOptions::new().create(true).append(true).open(&log_path) {
-            Ok(file) => file,
-            Err(err) => {
-                eprintln!("failed to open log file {}: {err}", log_path.display());
-                tracing_subscriber::fmt().with_env_filter(env_filter).init();
-                return;
+        // Default to `info` so release builds are observable without requiring users to set
+        // RUST_LOG. If RUST_LOG is explicitly set, respect it.
+        let env_filter = match std::env::var("RUST_LOG") {
+            Ok(_) => tracing_subscriber::EnvFilter::from_default_env(),
+            Err(_) => tracing_subscriber::EnvFilter::new("info"),
+        };
+
+        let primary_path = client_log_path();
+        let fallback_path = std::env::temp_dir()
+            .join("ClipRelay")
+            .join("cliprelay-client.log");
+
+        let mut opened: Option<(std::fs::File, PathBuf)> = None;
+        for attempt in 1..=MAX_ATTEMPTS {
+            match OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&primary_path)
+            {
+                Ok(file) => {
+                    opened = Some((file, primary_path.clone()));
+                    break;
+                }
+                Err(err) => {
+                    if attempt >= MAX_ATTEMPTS {
+                        eprintln!("failed to open log file {}: {err}", primary_path.display());
+                        break;
+                    }
+                    let backoff_ms = BACKOFF_BASE_MS.saturating_mul(1_u64 << (attempt - 1));
+                    std::thread::sleep(Duration::from_millis(backoff_ms));
+                }
             }
+        }
+
+        if opened.is_none() {
+            if let Some(parent) = fallback_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Ok(file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&fallback_path)
+            {
+                opened = Some((file, fallback_path.clone()));
+            }
+        }
+
+        let Some((file, chosen_path)) = opened else {
+            // Last resort: log to stderr (note: in a Windows-subsystem build, this may be invisible).
+            tracing_subscriber::fmt().with_env_filter(env_filter).init();
+            return;
         };
 
         let make_writer = FileMakeWriter {
@@ -2472,6 +2531,8 @@ mod windows_client {
             .with_env_filter(env_filter)
             .with_writer(make_writer)
             .init();
+
+        info!(log_path = %chosen_path.display(), "logging initialized");
     }
 
     fn client_log_path() -> PathBuf {
@@ -2660,6 +2721,7 @@ mod windows_client {
                     };
 
                     counter = counter.saturating_add(1);
+                    info!(counter, bytes = text.len(), "queueing encrypted text send");
                     let plaintext = ClipboardEventPlaintext {
                         sender_device_id: config.device_id.clone(),
                         counter,
@@ -2805,6 +2867,11 @@ mod windows_client {
                         };
 
                         if event.mime == MIME_TEXT_PLAIN {
+                            info!(
+                                sender_device_id = %event.sender_device_id,
+                                bytes = event.text_utf8.len(),
+                                "received encrypted text"
+                            );
                             let content_hash = sha256_bytes(event.text_utf8.as_bytes());
                             let duplicate_of_last_apply = shared_state
                                 .last_applied_hash
@@ -2832,6 +2899,12 @@ mod windows_client {
                                 event.sender_device_id,
                                 &event.text_utf8,
                             ) {
+                                info!(
+                                    sender_device_id = %completed.sender_device_id,
+                                    file_name = %completed.file_name,
+                                    size_bytes = completed.size_bytes,
+                                    "received complete encrypted file"
+                                );
                                 let _ = ui_event_tx.send(UiEvent::LastReceived(now_unix_ms()));
                                 let _ = ui_event_tx.send(UiEvent::IncomingFile {
                                     sender_device_id: completed.sender_device_id,
@@ -2936,6 +3009,13 @@ mod windows_client {
             ));
         }
 
+        info!(
+            file_name = %file_name,
+            total_size_bytes = total_size,
+            total_chunks,
+            "starting encrypted file send"
+        );
+
         let engine = base64::engine::general_purpose::STANDARD;
         for chunk_index in 0..total_chunks {
             let start = (chunk_index as usize) * FILE_CHUNK_RAW_BYTES;
@@ -2971,6 +3051,13 @@ mod windows_client {
                 encrypt_clipboard_event(&room_key, &plaintext).map_err(|e| e.to_string())?;
             network_send_clipboard(network_send_tx, payload).await;
         }
+
+        info!(
+            file_name = %file_name,
+            total_size_bytes = total_size,
+            total_chunks,
+            "finished encrypted file send"
+        );
 
         let _ = ui_event_tx.send(UiEvent::LastSent(now_unix_ms()));
         Ok(())
@@ -3200,17 +3287,21 @@ mod windows_client {
                     for peer in peer_list.peers {
                         peers.insert(peer.device_id.clone(), peer);
                     }
+                    info!(peers = peers.len(), "peer list updated");
                     let _ = ui_event_tx.send(UiEvent::Peers(peers.values().cloned().collect()));
                 }
                 ControlMessage::PeerJoined(joined) => {
                     peers.insert(joined.peer.device_id.clone(), joined.peer);
+                    info!(peers = peers.len(), "peer joined");
                     let _ = ui_event_tx.send(UiEvent::Peers(peers.values().cloned().collect()));
                 }
                 ControlMessage::PeerLeft(left) => {
                     peers.remove(&left.device_id);
+                    info!(peers = peers.len(), "peer left");
                     let _ = ui_event_tx.send(UiEvent::Peers(peers.values().cloned().collect()));
                 }
                 ControlMessage::SaltExchange(exchange) => {
+                    info!(device_ids = ?exchange.device_ids, "salt exchange received");
                     let room_key = match derive_room_key(&config.room_code, &exchange.device_ids) {
                         Ok(key) => key,
                         Err(err) => {
@@ -3280,5 +3371,4 @@ mod windows_client {
         let digest = Sha256::digest(bytes);
         digest.into()
     }
-
 }

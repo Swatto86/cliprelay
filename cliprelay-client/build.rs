@@ -20,16 +20,14 @@ fn main() {
     res.set("FileDescription", "ClipRelay Client");
     res.set("InternalName", "cliprelay-client");
     res.set("OriginalFilename", "cliprelay-client.exe");
-    
+
     if let Err(e) = res.compile() {
         eprintln!("Warning: icon embedding failed: {}", e);
     }
 
     // Embed manifest via MSVC linker (requires MSVC toolchain)
     // This is critical for Common Controls v6
-    let manifest_abs = std::env::current_dir()
-        .unwrap()
-        .join(manifest_path);
+    let manifest_abs = std::env::current_dir().unwrap().join(manifest_path);
     println!("cargo:rustc-link-arg-bin=cliprelay-client=/MANIFEST:EMBED");
     println!(
         "cargo:rustc-link-arg-bin=cliprelay-client=/MANIFESTINPUT:{}",
