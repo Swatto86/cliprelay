@@ -397,7 +397,7 @@ mod windows_client {
 
             nwg::Button::builder()
                 .text("Send File...")
-                .position((send_width - scale_px(196), send_height - scale_px(56)))
+                .position((send_width - scale_px(204), send_height - scale_px(56)))
                 .size((scale_px(180), scale_px(36)))
                 .parent(&send_window)
                 .build(&mut send_file_button)
@@ -502,7 +502,7 @@ mod windows_client {
 
             nwg::Button::builder()
                 .text("Dismiss")
-                .position((popup_width - scale_px(196), popup_height - scale_px(54)))
+                .position((popup_width - scale_px(204), popup_height - scale_px(54)))
                 .size((scale_px(180), scale_px(36)))
                 .parent(&popup_window)
                 .build(&mut popup_dismiss_button)
@@ -898,12 +898,13 @@ mod windows_client {
                 });
 
             let options_text = format!(
-                "Server URL: {}\r\nRoom code: {}\r\nRoom ID: {}\r\nDevice name: {}\r\nDevice id: {}\r\nConnection: {}\r\nPeers: {}\r\nRoom key ready: {}\r\nLast sent: {}\r\nLast received: {}",
+                "Server URL: {}\r\nRoom code: {}\r\nRoom ID: {}\r\nDevice name: {}\r\nDevice id: {}\r\nLast counter (persisted): {}\r\nConnection: {}\r\nPeers: {}\r\nRoom key ready: {}\r\nLast sent: {}\r\nLast received: {}",
                 self.config.server_url,
                 self.config.room_code,
                 self.config.room_id,
                 self.config.device_name,
                 self.config.device_id,
+                self.config.initial_counter,
                 self.state.connection_status,
                 self.state.peers.len(),
                 if self.state.room_key_ready {
@@ -1240,12 +1241,14 @@ mod windows_client {
             }
         };
 
+        let device_id = stable_device_id(&saved.device_name);
+
         let cfg = ClientConfig {
             room_id: room_id_from_code(&saved.room_code),
             server_url: saved.server_url,
             room_code: saved.room_code,
             device_name: saved.device_name,
-            device_id: stable_device_id(),
+            device_id,
             background: args.background,
             initial_counter: saved.last_counter,
         };
@@ -1977,6 +1980,19 @@ mod windows_client {
         }
     }
 
+    #[test]
+    fn device_id_from_is_deterministic_and_device_name_scoped() {
+        let a1 = device_id_from("host-a", "user-a", "Laptop");
+        let a2 = device_id_from("host-a", "user-a", "Laptop");
+        assert_eq!(a1, a2);
+
+        let b = device_id_from("host-a", "user-a", "Desktop");
+        assert_ne!(a1, b);
+
+        let c = device_id_from("host-b", "user-a", "Laptop");
+        assert_ne!(a1, c);
+    }
+
     fn init_logging() {
         let env_filter = tracing_subscriber::EnvFilter::from_default_env();
 
@@ -2123,7 +2139,7 @@ mod windows_client {
 
         let command_task = tokio::spawn(runtime_command_task(
             runtime_cmd_rx,
-            shared_state,
+            shared_state.clone(),
             network_send_tx.clone(),
             config.clone(),
             ui_event_tx.clone(),
@@ -2136,6 +2152,16 @@ mod windows_client {
         }
 
         command_task.abort();
+
+        // If any task ends, treat the session as disconnected and update UI accordingly.
+        if let Ok(mut key_slot) = shared_state.room_key.lock() {
+            *key_slot = None;
+        }
+        let _ = ui_event_tx.send(UiEvent::RoomKeyReady(false));
+        let _ = ui_event_tx.send(UiEvent::ConnectionStatus("Disconnected".to_owned()));
+        let _ = ui_event_tx.send(UiEvent::RuntimeError(
+            "connection ended (send/receive task stopped)".to_owned(),
+        ));
     }
 
     async fn runtime_command_task(
@@ -2767,7 +2793,13 @@ mod windows_client {
         out
     }
 
-    fn stable_device_id() -> String {
+    fn device_id_from(host: &str, user: &str, device_name: &str) -> String {
+        let raw = format!("{}:{}:{}", host, user, device_name.trim());
+        let digest = Sha256::digest(raw.as_bytes());
+        hex::encode(&digest[0..16])
+    }
+
+    fn stable_device_id(device_name: &str) -> String {
         let host = std::env::var("COMPUTERNAME")
             .ok()
             .or_else(|| std::env::var("HOSTNAME").ok())
@@ -2776,10 +2808,7 @@ mod windows_client {
             .ok()
             .or_else(|| std::env::var("USER").ok())
             .unwrap_or_else(|| "unknown-user".to_owned());
-        let pid = std::process::id();
-        let raw = format!("{}:{}:{}", host, user, pid);
-        let digest = Sha256::digest(raw.as_bytes());
-        hex::encode(&digest[0..16])
+        device_id_from(&host, &user, device_name)
     }
 
     fn now_unix_ms() -> u64 {
