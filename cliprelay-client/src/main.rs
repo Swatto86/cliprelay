@@ -947,10 +947,14 @@ mod windows_client {
                 return;
             }
 
-            let margin = scale_px(24);
-            let (w, h) = self.send_window.size();
-            let x = ((nwg::Monitor::width() as i32) - (w as i32) - margin).max(0);
-            let y = ((nwg::Monitor::height() as i32) - (h as i32) - margin).max(0);
+            // Force a known size and center the window. This avoids cases where the window ends up
+            // effectively invisible (e.g., bad coordinates or stale size) while still showing on
+            // the taskbar.
+            let w: u32 = scale_px(420) as u32;
+            let h: u32 = scale_px(340) as u32;
+            let x = ((nwg::Monitor::width() as i32) - (w as i32)).max(0) / 2;
+            let y = ((nwg::Monitor::height() as i32) - (h as i32)).max(0) / 2;
+            self.send_window.set_size(w, h);
             self.send_window.set_position(x, y);
             self.send_window.set_visible(true);
             self.send_window.set_focus();
