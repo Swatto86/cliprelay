@@ -67,11 +67,13 @@ function Compare-SemVer([string]$Left, [string]$Right) {
 
 function Update-WorkspaceVersion([string]$CargoTomlPath, [string]$OldVersion, [string]$NewVersion) {
     $content = Get-Content -Path $CargoTomlPath -Raw
-    $updated = $content -replace ('(?m)^(version\s*=\s*")' + [regex]::Escape($OldVersion) + '("\s*$)'), ('$1' + $NewVersion + '$2')
+    $pattern = '(?m)^(version\s*=\s*")' + [regex]::Escape($OldVersion) + '("\s*$)'
+    $replacement = '${1}' + $NewVersion + '${2}'
+    $updated = $content -replace $pattern, $replacement
     if ($updated -eq $content) {
         throw "Workspace version replacement did not change $CargoTomlPath"
     }
-    Set-Content -Path $CargoTomlPath -Value $updated -Encoding UTF8
+    Set-Content -Path $CargoTomlPath -Value $updated -Encoding UTF8 -NoNewline
 }
 
 function Get-RemoteHttpsUrl {
