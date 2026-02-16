@@ -3,7 +3,7 @@ fn main() {
     use std::path::Path;
 
     let manifest_path = Path::new("assets/app.manifest");
-    let icon_path = Path::new("assets/cliprelay.ico");
+    let icon_path = Path::new("assets/app-icon-circle-c.ico");
 
     println!("cargo:rerun-if-changed={}", manifest_path.display());
     println!("cargo:rerun-if-changed={}", icon_path.display());

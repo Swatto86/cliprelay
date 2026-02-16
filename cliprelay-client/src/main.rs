@@ -43,7 +43,10 @@ mod windows_client {
     use tracing::{error, info, warn};
     use tracing_subscriber::fmt::MakeWriter;
     use url::Url;
-    use windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE,
+        SetForegroundWindow, SetWindowPos, ShowWindow,
+    };
 
     use cliprelay_client::autostart;
 
@@ -99,7 +102,7 @@ mod windows_client {
     static TRAY_ICON_RED_BYTES: &[u8] = include_bytes!("../assets/tray-red.ico");
     static TRAY_ICON_AMBER_BYTES: &[u8] = include_bytes!("../assets/tray-amber.ico");
     static TRAY_ICON_GREEN_BYTES: &[u8] = include_bytes!("../assets/tray-green.ico");
-    static APP_ICON_BYTES: &[u8] = include_bytes!("../assets/app-icon-plain.ico");
+    static APP_ICON_BYTES: &[u8] = include_bytes!("../assets/app-icon-circle-c.ico");
     #[derive(Parser, Debug, Clone)]
     #[command(name = "cliprelay-client")]
     struct ClientArgs {
@@ -952,10 +955,20 @@ mod windows_client {
             self.send_window.set_visible(true);
             self.send_window.set_focus();
 
-            // Bring window to foreground using Win32 API
-            unsafe {
-                let hwnd = self.send_window.handle.hwnd().unwrap();
-                SetForegroundWindow(hwnd as isize);
+            // Bring window to foreground reliably.
+            // `SetForegroundWindow` alone can be flaky depending on focus rules/minimized state.
+            if let Some(hwnd) = self.send_window.handle.hwnd() {
+                let hwnd = hwnd as isize;
+                unsafe {
+                    ShowWindow(hwnd, SW_RESTORE);
+                    // "Topmost pulse" to ensure it's actually visible even when focus rules interfere.
+                    let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
+                    let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
+                    let _ = SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+                    SetForegroundWindow(hwnd);
+                }
+            } else {
+                warn!("send window has no HWND; cannot force foreground");
             }
         }
 
