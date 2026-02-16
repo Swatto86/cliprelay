@@ -22,7 +22,7 @@ ClipRelay synchronizes clipboard text across online devices in a shared room usi
 - `cliprelay-client/src/main.rs`: native-windows-gui tray-first app (WinAPI-native, DPI-aware) with status-indicator tray icons, left-click open send UI, and right-click options/quit menu.
 - `cliprelay-client/assets/app.manifest`: Windows manifest with per-monitor DPI awareness and common-controls v6.
 - `cliprelay-client/assets/cliprelay.ico`: client icon used for tray + executable resources.
-- `cliprelay-client/build.rs`: Windows resource embedding pipeline (manifest + icon).
+- `cliprelay-client/build.rs`: Windows manifest embedding (Common Controls v6 + DPI) via MSVC linker args so builds don't depend on `rc.exe`.
 - `update-application.ps1`: release automation script (version bump, validation, tagging, push, old-tag cleanup) with `-DryRun` preview mode.
 - `docs/HOW_IT_WORKS.md`: end-to-end architecture + user guide + cloud ops notes (Caddy + systemd).
 - `deploy/cliprelay-relay.service`: systemd unit for running the relay on Linux hosts.
