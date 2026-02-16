@@ -29,7 +29,7 @@ url.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 native-windows-gui = { version = "1.0", features = ["high-dpi"] }
-windows-sys = { version = "0.48", features = ["Win32_System_Registry", "Win32_Foundation"] }
+windows-sys = { version = "0.48", features = ["Win32_System_Registry", "Win32_Foundation", "Win32_System_LibraryLoader"] }
 
-[build-dependencies]
-embed-resource = "3.0"
+[dev-dependencies]
+tempfile = "3"
