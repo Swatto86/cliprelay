@@ -20,9 +20,11 @@ ClipRelay synchronizes clipboard text across online devices in a shared room usi
 - `cliprelay-relay/src/main.rs`: relay CLI entrypoint.
 - `cliprelay-relay/tests/e2e_relay.rs`: relay E2E integration tests (forwarding, capacity, invalid-first-frame, sender-mismatch, malformed-frame, unexpected-control).
 - `cliprelay-client/src/main.rs`: native-windows-gui tray-first app (WinAPI-native, DPI-aware) with status-indicator tray icons, left-click open send UI, and right-click options/quit menu.
+- `cliprelay-client/src/ui_state.rs`: UI window placement persistence (load/save with size bounds, clamping helper).
 - `cliprelay-client/assets/app.manifest`: Windows manifest with per-monitor DPI awareness and common-controls v6.
-- `cliprelay-client/assets/cliprelay.ico`: client icon used for tray + executable resources.
+- `cliprelay-client/assets/app-icon-circle-c.ico`: client icon used for tray + executable resources.
 - `cliprelay-client/build.rs`: Windows resource embedding (icon via winres, manifest via MSVC linker) ensuring taskbar icon and Common Controls v6 support.
+- `cliprelay-client/tests/ui_state.rs`: regression tests for window placement persistence helpers.
 - `update-application.ps1`: release automation script (version bump, validation, tagging, push, old-tag cleanup) with `-DryRun` preview mode.
 - `docs/HOW_IT_WORKS.md`: end-to-end architecture + user guide + cloud ops notes (Caddy + systemd).
 - `deploy/cliprelay-relay.service`: systemd unit for running the relay on Linux hosts.

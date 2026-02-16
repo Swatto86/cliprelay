@@ -223,6 +223,8 @@ pub mod autostart {
     }
 }
 
+pub mod ui_state;
+
 #[cfg(not(target_os = "windows"))]
 pub mod autostart {
     use std::path::Path;

@@ -49,6 +49,7 @@ mod windows_client {
     };
 
     use cliprelay_client::autostart;
+    use cliprelay_client::ui_state::{self, SavedUiState, WindowPlacement};
 
     #[derive(Clone)]
     struct FileMakeWriter {
@@ -273,6 +274,17 @@ mod windows_client {
         }
     }
 
+    fn load_ui_state_logged() -> SavedUiState {
+        let path = ui_state::ui_state_path();
+        match ui_state::load_ui_state_from_path(&path) {
+            Ok(s) => s,
+            Err(err) => {
+                warn!("failed to load ui_state ({}): {err}", path.display());
+                SavedUiState::default()
+            }
+        }
+    }
+
     #[derive(Debug, Clone)]
     struct SharedRuntimeState {
         room_key: Arc<Mutex<Option<[u8; 32]>>>,
@@ -344,6 +356,9 @@ mod windows_client {
         last_tray_click_ms: Option<u64>,
 
         history: VecDeque<ActivityEntry>,
+
+        ui_state: SavedUiState,
+        last_ui_state_save_ms: Option<u64>,
     }
 
     impl ClipRelayTrayApp {
@@ -380,6 +395,113 @@ mod windows_client {
             }
 
             out
+        }
+
+        fn clamp_placement_in_rect(
+            placement: WindowPlacement,
+            min_w: u32,
+            min_h: u32,
+            rect: [i32; 4],
+        ) -> WindowPlacement {
+            ui_state::clamp_placement_in_rect(
+                placement,
+                min_w,
+                min_h,
+                scale_px(16),
+                rect,
+            )
+        }
+
+        fn clamp_placement_for_window(
+            &self,
+            window: &nwg::Window,
+            placement: WindowPlacement,
+            min_w: u32,
+            min_h: u32,
+        ) -> WindowPlacement {
+            let rect = nwg::Monitor::monitor_rect_from_window(window);
+            Self::clamp_placement_in_rect(placement, min_w, min_h, rect)
+        }
+
+        fn apply_restored_placement(
+            &self,
+            window: &nwg::Window,
+            placement: WindowPlacement,
+            min_w: u32,
+            min_h: u32,
+        ) {
+            // First, apply the raw placement so we can determine the closest monitor
+            // for multi-monitor setups (including negative virtual-screen coordinates).
+            window.set_size(placement.w, placement.h);
+            window.set_position(placement.x, placement.y);
+
+            let clamped = self.clamp_placement_for_window(window, placement, min_w, min_h);
+            window.set_size(clamped.w, clamped.h);
+            window.set_position(clamped.x, clamped.y);
+        }
+
+        fn capture_window_placement(window: &nwg::Window) -> WindowPlacement {
+            let (x, y) = window.position();
+            let (w, h) = window.size();
+            WindowPlacement { x, y, w, h }
+        }
+
+        fn maybe_save_ui_state(&mut self) {
+            // Debounce disk writes (move/resize can be chatty)
+            const MIN_SAVE_GAP_MS: u64 = 600;
+            let now = now_unix_ms();
+            if self
+                .last_ui_state_save_ms
+                .is_some_and(|prev| now.saturating_sub(prev) < MIN_SAVE_GAP_MS)
+            {
+                return;
+            }
+            self.last_ui_state_save_ms = Some(now);
+            if let Err(err) = ui_state::save_ui_state_with_retry(&self.ui_state) {
+                warn!("failed to save ui_state: {err}");
+            }
+        }
+
+        fn restore_send_window_placement(&self) {
+            let min_w = scale_px(420) as u32;
+            let min_h = scale_px(320) as u32;
+
+            let placement = self.ui_state.send.unwrap_or_else(|| {
+                let w = scale_px(480) as u32;
+                let h = scale_px(360) as u32;
+                let x = (nwg::Monitor::width() - w as i32) / 2;
+                let y = (nwg::Monitor::height() - h as i32) / 2;
+                WindowPlacement { x, y, w, h }
+            });
+            self.apply_restored_placement(&self.send_window, placement, min_w, min_h);
+        }
+
+        fn restore_options_window_placement(&self) {
+            let min_w = scale_px(440) as u32;
+            let min_h = scale_px(320) as u32;
+
+            let placement = self.ui_state.options.unwrap_or_else(|| {
+                let w = scale_px(520) as u32;
+                let h = scale_px(380) as u32;
+                let x = (nwg::Monitor::width() - w as i32) / 2;
+                let y = (nwg::Monitor::height() - h as i32) / 2;
+                WindowPlacement { x, y, w, h }
+            });
+            self.apply_restored_placement(&self.options_window, placement, min_w, min_h);
+        }
+
+        fn restore_popup_window_placement(&self) {
+            let min_w = scale_px(420) as u32;
+            let min_h = scale_px(240) as u32;
+
+            let placement = self.ui_state.popup.unwrap_or_else(|| {
+                let w = scale_px(480) as u32;
+                let h = scale_px(280) as u32;
+                let x = (nwg::Monitor::width() - w as i32) / 2;
+                let y = (nwg::Monitor::height() - h as i32) / 2;
+                WindowPlacement { x, y, w, h }
+            });
+            self.apply_restored_placement(&self.popup_window, placement, min_w, min_h);
         }
 
         fn layout_send_window(&self) {
@@ -511,6 +633,7 @@ mod windows_client {
             };
 
             let history = load_history();
+            let ui_state = load_ui_state_logged();
 
             #[cfg(not(test))]
             runtime.spawn(run_client_runtime(
@@ -794,6 +917,8 @@ mod windows_client {
                 tray_status: TrayStatus::Amber,
                 last_tray_click_ms: None,
                 history,
+                ui_state,
+                last_ui_state_save_ms: None,
             }));
 
             {
@@ -855,6 +980,35 @@ mod windows_client {
 
         fn handle_event(&mut self, event: nwg::Event, handle: nwg::ControlHandle) {
             match event {
+                nwg::Event::OnMove if handle == self.send_window.handle => {
+                    self.ui_state.send = Some(Self::capture_window_placement(&self.send_window));
+                    self.maybe_save_ui_state();
+                }
+                nwg::Event::OnMove if handle == self.options_window.handle => {
+                    self.ui_state.options =
+                        Some(Self::capture_window_placement(&self.options_window));
+                    self.maybe_save_ui_state();
+                }
+                nwg::Event::OnMove if handle == self.popup_window.handle => {
+                    self.ui_state.popup = Some(Self::capture_window_placement(&self.popup_window));
+                    self.maybe_save_ui_state();
+                }
+                nwg::Event::OnResizeEnd if handle == self.send_window.handle => {
+                    self.ui_state.send = Some(Self::capture_window_placement(&self.send_window));
+                    self.layout_send_window();
+                    self.maybe_save_ui_state();
+                }
+                nwg::Event::OnResizeEnd if handle == self.options_window.handle => {
+                    self.ui_state.options =
+                        Some(Self::capture_window_placement(&self.options_window));
+                    self.layout_options_window();
+                    self.maybe_save_ui_state();
+                }
+                nwg::Event::OnResizeEnd if handle == self.popup_window.handle => {
+                    self.ui_state.popup = Some(Self::capture_window_placement(&self.popup_window));
+                    self.layout_popup_window();
+                    self.maybe_save_ui_state();
+                }
                 nwg::Event::OnResize if handle == self.send_window.handle => {
                     self.layout_send_window();
                 }
@@ -891,6 +1045,13 @@ mod windows_client {
                     self.open_options_window();
                 }
                 nwg::Event::OnMenuItemSelected if handle == self.tray_quit_item.handle => {
+                    self.ui_state.send = Some(Self::capture_window_placement(&self.send_window));
+                    self.ui_state.options =
+                        Some(Self::capture_window_placement(&self.options_window));
+                    self.ui_state.popup = Some(Self::capture_window_placement(&self.popup_window));
+                    if let Err(err) = ui_state::save_ui_state_with_retry(&self.ui_state) {
+                        warn!("failed to save ui_state on quit: {err}");
+                    }
                     self.poll_timer.stop();
                     nwg::stop_thread_dispatch();
                 }
@@ -960,12 +1121,19 @@ mod windows_client {
                     self.dismiss_latest_notification();
                 }
                 nwg::Event::OnWindowClose if handle == self.send_window.handle => {
+                    self.ui_state.send = Some(Self::capture_window_placement(&self.send_window));
+                    self.maybe_save_ui_state();
                     self.send_window.set_visible(false);
                 }
                 nwg::Event::OnWindowClose if handle == self.options_window.handle => {
+                    self.ui_state.options =
+                        Some(Self::capture_window_placement(&self.options_window));
+                    self.maybe_save_ui_state();
                     self.options_window.set_visible(false);
                 }
                 nwg::Event::OnWindowClose if handle == self.popup_window.handle => {
+                    self.ui_state.popup = Some(Self::capture_window_placement(&self.popup_window));
+                    self.maybe_save_ui_state();
                     self.popup_window.set_visible(false);
                 }
                 _ => {}
@@ -1214,21 +1382,17 @@ mod windows_client {
             self.tray.show(text, Some(title), Some(flags), Some(icon));
         }
 
-        fn toggle_send_window(&self) {
+        fn toggle_send_window(&mut self) {
             if self.send_window.visible() {
+                self.ui_state.send = Some(Self::capture_window_placement(&self.send_window));
+                if let Err(err) = ui_state::save_ui_state_with_retry(&self.ui_state) {
+                    warn!("failed to save ui_state: {err}");
+                }
                 self.send_window.set_visible(false);
                 return;
             }
 
-            // Force a known size and center the window. This avoids cases where the window ends up
-            // effectively invisible (e.g., bad coordinates or stale size) while still showing on
-            // the taskbar.
-            let w: u32 = scale_px(420) as u32;
-            let h: u32 = scale_px(340) as u32;
-            let x = ((nwg::Monitor::width() as i32) - (w as i32)).max(0) / 2;
-            let y = ((nwg::Monitor::height() as i32) - (h as i32)).max(0) / 2;
-            self.send_window.set_size(w, h);
-            self.send_window.set_position(x, y);
+            self.restore_send_window_placement();
             self.send_window.set_visible(true);
             self.send_window.set_focus();
 
@@ -1251,8 +1415,9 @@ mod windows_client {
             }
         }
 
-        fn open_options_window(&self) {
+        fn open_options_window(&mut self) {
             if !self.options_window.visible() {
+                self.restore_options_window_placement();
                 self.options_window.set_visible(true);
             }
             self.options_window.set_focus();
@@ -1383,6 +1548,10 @@ mod windows_client {
 
         fn show_popup_if_needed(&mut self) {
             if self.state.notifications.is_empty() {
+                if self.popup_window.visible() {
+                    self.ui_state.popup = Some(Self::capture_window_placement(&self.popup_window));
+                    self.maybe_save_ui_state();
+                }
                 self.popup_window.set_visible(false);
                 return;
             }
@@ -1412,14 +1581,15 @@ mod windows_client {
                 }
             }
 
-            let margin = scale_px(24);
-            let (popup_width, popup_height) = self.popup_window.size();
-            let x = ((nwg::Monitor::width() as i32) - (popup_width as i32) - margin).max(0);
-            let y = ((nwg::Monitor::height() as i32) - (popup_height as i32) - margin).max(0);
-
-            self.popup_window.set_position(x, y);
-            self.popup_window.set_visible(true);
-            self.popup_window.set_focus();
+            let was_visible = self.popup_window.visible();
+            if !was_visible {
+                self.restore_popup_window_placement();
+                self.layout_popup_window();
+                self.popup_window.set_visible(true);
+                self.popup_window.set_focus();
+            } else {
+                self.popup_window.set_visible(true);
+            }
         }
 
         fn apply_latest_notification(&mut self) {
@@ -3110,4 +3280,5 @@ mod windows_client {
         let digest = Sha256::digest(bytes);
         digest.into()
     }
+
 }
