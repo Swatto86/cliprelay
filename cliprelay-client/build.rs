@@ -1,19 +1,30 @@
 #[cfg(target_os = "windows")]
 fn main() {
-    use std::path::PathBuf;
+    use std::path::Path;
 
-    let manifest_path: PathBuf = [env!("CARGO_MANIFEST_DIR"), "assets", "app.manifest"]
-        .iter()
-        .collect();
+    let manifest_path = Path::new("assets/app.manifest");
+    let icon_path = Path::new("assets/cliprelay.ico");
 
     println!("cargo:rerun-if-changed={}", manifest_path.display());
+    println!("cargo:rerun-if-changed={}", icon_path.display());
 
-    // Embed the manifest via the MSVC linker so builds don't depend on `rc.exe`.
-    // This is required for Common Controls v6 activation (and functions like `GetWindowSubclass`).
+    // Use winres to embed icon (works cross-platform)
+    let mut res = winres::WindowsResource::new();
+    res.set_icon(icon_path.to_str().unwrap());
+    
+    if let Err(e) = res.compile() {
+        eprintln!("Warning: icon embedding failed: {}", e);
+    }
+
+    // Embed manifest via MSVC linker (requires MSVC toolchain)
+    // This is critical for Common Controls v6
+    let manifest_abs = std::env::current_dir()
+        .unwrap()
+        .join(manifest_path);
     println!("cargo:rustc-link-arg-bin=cliprelay-client=/MANIFEST:EMBED");
     println!(
         "cargo:rustc-link-arg-bin=cliprelay-client=/MANIFESTINPUT:{}",
-        manifest_path.display()
+        manifest_abs.display()
     );
 }
 

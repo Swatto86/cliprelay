@@ -347,112 +347,120 @@ mod windows_client {
                 .build(&mut tray_quit_item)
                 .map_err(|err| err.to_string())?;
 
-            let send_width = scale_px(460);
-            let send_height = scale_px(320);
+            let send_width = scale_px(500);
+            let send_height = scale_px(380);
+            let send_x = (nwg::Monitor::width() - send_width) / 2;
+            let send_y = (nwg::Monitor::height() - send_height) / 2;
 
             nwg::Window::builder()
-                .flags(nwg::WindowFlags::WINDOW)
+                .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE)
                 .size((send_width, send_height))
-                .position((scale_px(160), scale_px(120)))
-                .title("ClipRelay Send")
+                .position((send_x, send_y))
+                .title("ClipRelay - Send Clipboard")
                 .icon(Some(&icon_app))
                 .build(&mut send_window)
                 .map_err(|err| err.to_string())?;
             send_window.set_visible(false);
 
             nwg::Label::builder()
-                .text("Status: Connecting")
-                .position((scale_px(16), scale_px(14)))
-                .size((send_width - scale_px(32), scale_px(24)))
+                .text("Status: Connecting...")
+                .position((scale_px(20), scale_px(16)))
+                .size((send_width - scale_px(40), scale_px(28)))
                 .parent(&send_window)
                 .build(&mut send_status_label)
                 .map_err(|err| err.to_string())?;
 
             nwg::TextBox::builder()
-                .position((scale_px(16), scale_px(42)))
-                .size((send_width - scale_px(32), scale_px(220)))
+                .position((scale_px(20), scale_px(52)))
+                .size((send_width - scale_px(40), scale_px(254)))
+                .flags(nwg::TextBoxFlags::TAB_STOP | nwg::TextBoxFlags::VISIBLE | nwg::TextBoxFlags::AUTOVSCROLL)
                 .focus(true)
                 .parent(&send_window)
                 .build(&mut send_text_box)
                 .map_err(|err| err.to_string())?;
 
             nwg::Button::builder()
-                .text("Send text")
-                .position((scale_px(16), send_height - scale_px(52)))
-                .size((scale_px(140), scale_px(34)))
+                .text("Send Text")
+                .position((scale_px(20), send_height - scale_px(64)))
+                .size((scale_px(200), scale_px(40)))
                 .parent(&send_window)
                 .build(&mut send_button)
                 .map_err(|err| err.to_string())?;
 
             nwg::Button::builder()
-                .text("Send file…")
-                .position((scale_px(164), send_height - scale_px(52)))
-                .size((scale_px(140), scale_px(34)))
+                .text("Send File...")
+                .position((send_width - scale_px(220), send_height - scale_px(64)))
+                .size((scale_px(200), scale_px(40)))
                 .parent(&send_window)
                 .build(&mut send_file_button)
                 .map_err(|err| err.to_string())?;
 
-            let options_width = scale_px(440);
-            let options_height = scale_px(300);
+            let options_width = scale_px(500);
+            let options_height = scale_px(360);
+            let options_x = (nwg::Monitor::width() - options_width) / 2;
+            let options_y = (nwg::Monitor::height() - options_height) / 2;
 
             nwg::Window::builder()
-                .flags(nwg::WindowFlags::WINDOW)
+                .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE)
                 .size((options_width, options_height))
-                .position((scale_px(200), scale_px(160)))
-                .title("ClipRelay Options")
+                .position((options_x, options_y))
+                .title("ClipRelay - Options")
                 .icon(Some(&icon_app))
                 .build(&mut options_window)
                 .map_err(|err| err.to_string())?;
             options_window.set_visible(false);
 
             nwg::TextBox::builder()
-                .position((scale_px(16), scale_px(16)))
-                .size((options_width - scale_px(32), scale_px(160)))
+                .position((scale_px(20), scale_px(16)))
+                .size((options_width - scale_px(40), scale_px(180)))
+                .flags(nwg::TextBoxFlags::VISIBLE | nwg::TextBoxFlags::AUTOVSCROLL)
                 .readonly(true)
                 .parent(&options_window)
                 .build(&mut options_info_box)
                 .map_err(|err| err.to_string())?;
 
             nwg::CheckBox::builder()
-                .text("Auto apply incoming clipboard")
-                .position((scale_px(16), scale_px(184)))
-                .size((options_width - scale_px(32), scale_px(24)))
+                .text("Automatically apply incoming clipboard changes")
+                .position((scale_px(20), scale_px(212)))
+                .size((options_width - scale_px(40), scale_px(28)))
                 .parent(&options_window)
                 .build(&mut options_auto_apply_checkbox)
                 .map_err(|err| err.to_string())?;
 
             nwg::CheckBox::builder()
-                .text("Start with Windows")
-                .position((scale_px(16), scale_px(214)))
-                .size((options_width - scale_px(32), scale_px(26)))
+                .text("Start ClipRelay when Windows starts")
+                .position((scale_px(20), scale_px(248)))
+                .size((options_width - scale_px(40), scale_px(28)))
                 .parent(&options_window)
                 .build(&mut options_autostart_checkbox)
                 .map_err(|err| err.to_string())?;
 
             nwg::Label::builder()
                 .text("")
-                .position((scale_px(16), scale_px(210)))
-                .size((options_width - scale_px(32), scale_px(24)))
+                .position((scale_px(20), scale_px(284)))
+                .size((options_width - scale_px(40), scale_px(24)))
                 .parent(&options_window)
                 .build(&mut options_error_label)
                 .map_err(|err| err.to_string())?;
 
             nwg::Button::builder()
                 .text("Close")
-                .position((options_width - scale_px(110), options_height - scale_px(52)))
-                .size((scale_px(90), scale_px(34)))
+                .position((options_width - scale_px(140), options_height - scale_px(64)))
+                .size((scale_px(120), scale_px(40)))
                 .parent(&options_window)
                 .build(&mut options_close_button)
                 .map_err(|err| err.to_string())?;
 
-            let popup_width = scale_px(440);
-            let popup_height = scale_px(250);
+            let popup_width = scale_px(480);
+            let popup_height = scale_px(280);
+            let popup_x = (nwg::Monitor::width() - popup_width) / 2;
+            let popup_y = (nwg::Monitor::height() - popup_height) / 2;
 
             nwg::Window::builder()
-                .flags(nwg::WindowFlags::WINDOW)
+                .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE)
                 .size((popup_width, popup_height))
-                .position((scale_px(100), scale_px(100)))
-                .title("ClipRelay Clipboard Notification")
+                .position((popup_x, popup_y))
+                .title("ClipRelay - New Clipboard")
                 .icon(Some(&icon_app))
                 .topmost(true)
                 .build(&mut popup_window)
@@ -461,32 +469,33 @@ mod windows_client {
 
             nwg::Label::builder()
                 .text("From: -")
-                .position((scale_px(16), scale_px(14)))
-                .size((popup_width - scale_px(32), scale_px(24)))
+                .position((scale_px(20), scale_px(16)))
+                .size((popup_width - scale_px(40), scale_px(28)))
                 .parent(&popup_window)
                 .build(&mut popup_sender_label)
                 .map_err(|err| err.to_string())?;
 
             nwg::TextBox::builder()
-                .position((scale_px(16), scale_px(42)))
-                .size((popup_width - scale_px(32), scale_px(150)))
+                .position((scale_px(20), scale_px(50)))
+                .size((popup_width - scale_px(40), scale_px(162)))
+                .flags(nwg::TextBoxFlags::VISIBLE | nwg::TextBoxFlags::AUTOVSCROLL)
                 .readonly(true)
                 .parent(&popup_window)
                 .build(&mut popup_text_box)
                 .map_err(|err| err.to_string())?;
 
             nwg::Button::builder()
-                .text("Apply")
-                .position((scale_px(16), popup_height - scale_px(52)))
-                .size((scale_px(120), scale_px(34)))
+                .text("Apply to Clipboard")
+                .position((scale_px(20), popup_height - scale_px(64)))
+                .size((scale_px(200), scale_px(40)))
                 .parent(&popup_window)
                 .build(&mut popup_apply_button)
                 .map_err(|err| err.to_string())?;
 
             nwg::Button::builder()
                 .text("Dismiss")
-                .position((scale_px(144), popup_height - scale_px(52)))
-                .size((scale_px(120), scale_px(34)))
+                .position((popup_width - scale_px(220), popup_height - scale_px(64)))
+                .size((scale_px(200), scale_px(40)))
                 .parent(&popup_window)
                 .build(&mut popup_dismiss_button)
                 .map_err(|err| err.to_string())?;
