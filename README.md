@@ -126,7 +126,15 @@ curl http://127.0.0.1:8080/healthz
 cargo run -p cliprelay-client -- --server-url ws://127.0.0.1:8080/ws --room-code correct-horse-battery-staple --device-name Laptop
 ```
 
-If `--room-code` is omitted, the Windows client shows a small **Setup** window to collect `room code`, `server URL`, and `device name`, then saves it under `%LOCALAPPDATA%\ClipRelay\config.json`.
+When launched **without** `--room-code`, the Windows client displays a **Room Choice** dialog on every launch:
+
+- If you have a saved configuration, you can choose:
+  - **"Use Saved Room"** - Connect using your previously saved room settings
+  - **"Setup New Room"** - Configure and connect to a new or different room
+  - **"Cancel"** - Exit without connecting
+- If no saved configuration exists, you'll go directly to the **Setup** dialog to enter room details.
+
+The setup saves your configuration to `%LOCALAPPDATA%\ClipRelay\config.json` for future use.
 
 Run a second client with the same room code and another device name.
 

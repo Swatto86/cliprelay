@@ -347,8 +347,8 @@ mod windows_client {
                 .build(&mut tray_quit_item)
                 .map_err(|err| err.to_string())?;
 
-            let send_width = scale_px(500);
-            let send_height = scale_px(380);
+            let send_width = scale_px(420);
+            let send_height = scale_px(340);
             let send_x = (nwg::Monitor::width() - send_width) / 2;
             let send_y = (nwg::Monitor::height() - send_height) / 2;
 
@@ -364,15 +364,15 @@ mod windows_client {
 
             nwg::Label::builder()
                 .text("Status: Connecting...")
-                .position((scale_px(20), scale_px(16)))
-                .size((send_width - scale_px(40), scale_px(28)))
+                .position((scale_px(16), scale_px(14)))
+                .size((send_width - scale_px(32), scale_px(24)))
                 .parent(&send_window)
                 .build(&mut send_status_label)
                 .map_err(|err| err.to_string())?;
 
             nwg::TextBox::builder()
-                .position((scale_px(20), scale_px(52)))
-                .size((send_width - scale_px(40), scale_px(254)))
+                .position((scale_px(16), scale_px(46)))
+                .size((send_width - scale_px(32), scale_px(230)))
                 .flags(nwg::TextBoxFlags::TAB_STOP | nwg::TextBoxFlags::VISIBLE | nwg::TextBoxFlags::AUTOVSCROLL)
                 .focus(true)
                 .parent(&send_window)
@@ -381,22 +381,22 @@ mod windows_client {
 
             nwg::Button::builder()
                 .text("Send Text")
-                .position((scale_px(20), send_height - scale_px(64)))
-                .size((scale_px(200), scale_px(40)))
+                .position((scale_px(16), send_height - scale_px(56)))
+                .size((scale_px(180), scale_px(36)))
                 .parent(&send_window)
                 .build(&mut send_button)
                 .map_err(|err| err.to_string())?;
 
             nwg::Button::builder()
                 .text("Send File...")
-                .position((send_width - scale_px(220), send_height - scale_px(64)))
-                .size((scale_px(200), scale_px(40)))
+                .position((send_width - scale_px(196), send_height - scale_px(56)))
+                .size((scale_px(180), scale_px(36)))
                 .parent(&send_window)
                 .build(&mut send_file_button)
                 .map_err(|err| err.to_string())?;
 
-            let options_width = scale_px(500);
-            let options_height = scale_px(360);
+            let options_width = scale_px(440);
+            let options_height = scale_px(340);
             let options_x = (nwg::Monitor::width() - options_width) / 2;
             let options_y = (nwg::Monitor::height() - options_height) / 2;
 
@@ -411,8 +411,8 @@ mod windows_client {
             options_window.set_visible(false);
 
             nwg::TextBox::builder()
-                .position((scale_px(20), scale_px(16)))
-                .size((options_width - scale_px(40), scale_px(180)))
+                .position((scale_px(16), scale_px(14)))
+                .size((options_width - scale_px(32), scale_px(170)))
                 .flags(nwg::TextBoxFlags::VISIBLE | nwg::TextBoxFlags::AUTOVSCROLL)
                 .readonly(true)
                 .parent(&options_window)
@@ -421,38 +421,38 @@ mod windows_client {
 
             nwg::CheckBox::builder()
                 .text("Automatically apply incoming clipboard changes")
-                .position((scale_px(20), scale_px(212)))
-                .size((options_width - scale_px(40), scale_px(28)))
+                .position((scale_px(16), scale_px(196)))
+                .size((options_width - scale_px(32), scale_px(24)))
                 .parent(&options_window)
                 .build(&mut options_auto_apply_checkbox)
                 .map_err(|err| err.to_string())?;
 
             nwg::CheckBox::builder()
                 .text("Start ClipRelay when Windows starts")
-                .position((scale_px(20), scale_px(248)))
-                .size((options_width - scale_px(40), scale_px(28)))
+                .position((scale_px(16), scale_px(228)))
+                .size((options_width - scale_px(32), scale_px(24)))
                 .parent(&options_window)
                 .build(&mut options_autostart_checkbox)
                 .map_err(|err| err.to_string())?;
 
             nwg::Label::builder()
                 .text("")
-                .position((scale_px(20), scale_px(284)))
-                .size((options_width - scale_px(40), scale_px(24)))
+                .position((scale_px(16), scale_px(260)))
+                .size((options_width - scale_px(32), scale_px(20)))
                 .parent(&options_window)
                 .build(&mut options_error_label)
                 .map_err(|err| err.to_string())?;
 
             nwg::Button::builder()
                 .text("Close")
-                .position((options_width - scale_px(140), options_height - scale_px(64)))
-                .size((scale_px(120), scale_px(40)))
+                .position((options_width - scale_px(116), options_height - scale_px(54)))
+                .size((scale_px(100), scale_px(36)))
                 .parent(&options_window)
                 .build(&mut options_close_button)
                 .map_err(|err| err.to_string())?;
 
-            let popup_width = scale_px(480);
-            let popup_height = scale_px(280);
+            let popup_width = scale_px(420);
+            let popup_height = scale_px(260);
             let popup_x = (nwg::Monitor::width() - popup_width) / 2;
             let popup_y = (nwg::Monitor::height() - popup_height) / 2;
 
@@ -469,15 +469,15 @@ mod windows_client {
 
             nwg::Label::builder()
                 .text("From: -")
-                .position((scale_px(20), scale_px(16)))
-                .size((popup_width - scale_px(40), scale_px(28)))
+                .position((scale_px(16), scale_px(14)))
+                .size((popup_width - scale_px(32), scale_px(24)))
                 .parent(&popup_window)
                 .build(&mut popup_sender_label)
                 .map_err(|err| err.to_string())?;
 
             nwg::TextBox::builder()
-                .position((scale_px(20), scale_px(50)))
-                .size((popup_width - scale_px(40), scale_px(162)))
+                .position((scale_px(16), scale_px(44)))
+                .size((popup_width - scale_px(32), scale_px(150)))
                 .flags(nwg::TextBoxFlags::VISIBLE | nwg::TextBoxFlags::AUTOVSCROLL)
                 .readonly(true)
                 .parent(&popup_window)
@@ -486,16 +486,16 @@ mod windows_client {
 
             nwg::Button::builder()
                 .text("Apply to Clipboard")
-                .position((scale_px(20), popup_height - scale_px(64)))
-                .size((scale_px(200), scale_px(40)))
+                .position((scale_px(16), popup_height - scale_px(54)))
+                .size((scale_px(180), scale_px(36)))
                 .parent(&popup_window)
                 .build(&mut popup_apply_button)
                 .map_err(|err| err.to_string())?;
 
             nwg::Button::builder()
                 .text("Dismiss")
-                .position((popup_width - scale_px(220), popup_height - scale_px(64)))
-                .size((scale_px(200), scale_px(40)))
+                .position((popup_width - scale_px(196), popup_height - scale_px(54)))
+                .size((scale_px(180), scale_px(36)))
                 .parent(&popup_window)
                 .build(&mut popup_dismiss_button)
                 .map_err(|err| err.to_string())?;
@@ -1233,6 +1233,13 @@ mod windows_client {
         nwg::dispatch_thread_events();
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum RoomChoice {
+        UseSaved,
+        SetupNew,
+        Cancel,
+    }
+
     fn resolve_config(
         args: &ClientArgs,
         interactive: bool,
@@ -1248,33 +1255,52 @@ mod windows_client {
             return Ok(Some(cfg));
         }
 
-        match load_saved_config() {
-            Ok(Some(cfg)) => return Ok(Some(cfg)),
-            Ok(None) => {}
+        if !interactive {
+            return match load_saved_config() {
+                Ok(Some(cfg)) => Ok(Some(cfg)),
+                Ok(None) => Ok(None),
+                Err(err) => {
+                    warn!("saved config invalid: {}", err);
+                    Ok(None)
+                }
+            };
+        }
+
+        let saved_config = match load_saved_config() {
+            Ok(Some(cfg)) => Some(cfg),
+            Ok(None) => None,
             Err(err) => {
-                warn!("saved config invalid; prompting: {}", err);
-                if interactive {
-                    nwg::simple_message(
-                        "ClipRelay",
-                        &format!(
-                            "Saved config was invalid and will be replaced after setup.\n\n{err}"
-                        ),
-                    );
+                warn!("saved config invalid; will prompt for new setup: {}", err);
+                nwg::simple_message(
+                    "ClipRelay",
+                    &format!(
+                        "Saved config was invalid and will be replaced after setup.\n\n{err}"
+                    ),
+                );
+                None
+            }
+        };
+
+        let choice = prompt_room_choice(saved_config.as_ref())?;
+
+        match choice {
+            RoomChoice::UseSaved => {
+                if let Some(cfg) = saved_config {
+                    Ok(Some(cfg))
                 } else {
-                    return Ok(None);
+                    Err("No saved config available".to_string())
                 }
             }
+            RoomChoice::SetupNew => {
+                let defaults = saved_config.unwrap_or_else(|| SavedClientConfig {
+                    server_url: args.server_url.clone(),
+                    room_code: String::new(),
+                    device_name: args.device_name.clone(),
+                });
+                prompt_for_config_gui(&defaults)
+            }
+            RoomChoice::Cancel => Ok(None),
         }
-
-        if !interactive {
-            return Ok(None);
-        }
-
-        prompt_for_config_gui(&SavedClientConfig {
-            server_url: args.server_url.clone(),
-            room_code: String::new(),
-            device_name: args.device_name.clone(),
-        })
     }
 
     fn validate_saved_config(cfg: &SavedClientConfig) -> Result<(), String> {
@@ -1407,115 +1433,298 @@ mod windows_client {
         Err("unreachable: save_saved_config retry loop".to_string())
     }
 
+    fn prompt_room_choice(saved_config: Option<&SavedClientConfig>) -> Result<RoomChoice, String> {
+        #[derive(Default)]
+        struct ChoiceUi {
+            window: nwg::Window,
+            _label_title: nwg::Label,
+            _label_info: nwg::Label,
+            button_use_saved: nwg::Button,
+            button_setup_new: nwg::Button,
+            button_cancel: nwg::Button,
+        }
+
+        let mut window = nwg::Window::default();
+        let mut label_title = nwg::Label::default();
+        let mut label_info = nwg::Label::default();
+        let mut button_use_saved = nwg::Button::default();
+        let mut button_setup_new = nwg::Button::default();
+        let mut button_cancel = nwg::Button::default();
+
+        let has_saved = saved_config.is_some();
+        let width = scale_px(440);
+        let height = if has_saved { scale_px(220) } else { scale_px(160) };
+        let x = (nwg::Monitor::width() - width) / 2;
+        let y = (nwg::Monitor::height() - height) / 2;
+
+        nwg::Window::builder()
+            .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE)
+            .size((width, height))
+            .position((x, y))
+            .title("ClipRelay - Choose Room")
+            .build(&mut window)
+            .map_err(|err| err.to_string())?;
+
+        nwg::Label::builder()
+            .text("Welcome to ClipRelay!")
+            .position((scale_px(16), scale_px(14)))
+            .size((width - scale_px(32), scale_px(24)))
+            .parent(&window)
+            .build(&mut label_title)
+            .map_err(|err| err.to_string())?;
+
+        let info_text = if let Some(cfg) = saved_config {
+            format!(
+                "You have a saved room:\n\nRoom: {}\nServer: {}\nDevice: {}\n\nUse saved room or setup a new one?",
+                cfg.room_code, cfg.server_url, cfg.device_name
+            )
+        } else {
+            "Setup a new room to start syncing clipboards.".to_string()
+        };
+
+        let info_height = if has_saved { scale_px(100) } else { scale_px(40) };
+        nwg::Label::builder()
+            .text(&info_text)
+            .position((scale_px(16), scale_px(48)))
+            .size((width - scale_px(32), info_height))
+            .parent(&window)
+            .build(&mut label_info)
+            .map_err(|err| err.to_string())?;
+
+        if has_saved {
+            nwg::Button::builder()
+                .text("Use Saved Room")
+                .position((scale_px(16), height - scale_px(52)))
+                .size((scale_px(130), scale_px(34)))
+                .parent(&window)
+                .build(&mut button_use_saved)
+                .map_err(|err| err.to_string())?;
+
+            nwg::Button::builder()
+                .text("Setup New Room")
+                .position((scale_px(154), height - scale_px(52)))
+                .size((scale_px(130), scale_px(34)))
+                .parent(&window)
+                .build(&mut button_setup_new)
+                .map_err(|err| err.to_string())?;
+
+            nwg::Button::builder()
+                .text("Cancel")
+                .position((width - scale_px(114), height - scale_px(52)))
+                .size((scale_px(98), scale_px(34)))
+                .parent(&window)
+                .build(&mut button_cancel)
+                .map_err(|err| err.to_string())?;
+        } else {
+            nwg::Button::builder()
+                .text("Setup New Room")
+                .position((scale_px(16), height - scale_px(52)))
+                .size((scale_px(150), scale_px(34)))
+                .parent(&window)
+                .build(&mut button_setup_new)
+                .map_err(|err| err.to_string())?;
+
+            nwg::Button::builder()
+                .text("Cancel")
+                .position((width - scale_px(114), height - scale_px(52)))
+                .size((scale_px(98), scale_px(34)))
+                .parent(&window)
+                .build(&mut button_cancel)
+                .map_err(|err| err.to_string())?;
+        }
+
+        let ui = Rc::new(ChoiceUi {
+            window,
+            _label_title: label_title,
+            _label_info: label_info,
+            button_use_saved,
+            button_setup_new,
+            button_cancel,
+        });
+
+        ui.window.set_visible(true);
+
+        let result: Arc<Mutex<Option<RoomChoice>>> = Arc::new(Mutex::new(None));
+        let result_arc = Arc::clone(&result);
+        let ui_for_handler = Rc::clone(&ui);
+
+        let window_handle = ui.window.handle;
+        let handler =
+            nwg::full_bind_event_handler(&window_handle, move |event, _evt_data, handle| {
+                let mut completed = false;
+                let mut choice = RoomChoice::Cancel;
+
+                if event == nwg::Event::OnWindowClose {
+                    completed = true;
+                    choice = RoomChoice::Cancel;
+                }
+
+                if event == nwg::Event::OnButtonClick {
+                    if handle == ui_for_handler.button_use_saved.handle {
+                        choice = RoomChoice::UseSaved;
+                        completed = true;
+                    } else if handle == ui_for_handler.button_setup_new.handle {
+                        choice = RoomChoice::SetupNew;
+                        completed = true;
+                    } else if handle == ui_for_handler.button_cancel.handle {
+                        choice = RoomChoice::Cancel;
+                        completed = true;
+                    }
+                }
+
+                if completed {
+                    if let Ok(mut locked) = result_arc.lock() {
+                        *locked = Some(choice);
+                    }
+                    nwg::stop_thread_dispatch();
+                }
+            });
+
+        nwg::dispatch_thread_events();
+        nwg::unbind_event_handler(&handler);
+
+        let choice = result
+            .lock()
+            .ok()
+            .and_then(|locked| *locked)
+            .unwrap_or(RoomChoice::Cancel);
+
+        Ok(choice)
+    }
+
     fn prompt_for_config_gui(
         defaults: &SavedClientConfig,
     ) -> Result<Option<SavedClientConfig>, String> {
         #[derive(Default)]
         struct SetupUi {
             window: nwg::Window,
+            _label_welcome: nwg::Label,
             _label_room: nwg::Label,
             input_room: nwg::TextInput,
             _label_server: nwg::Label,
             input_server: nwg::TextInput,
             _label_device: nwg::Label,
             input_device: nwg::TextInput,
+            _label_tip: nwg::Label,
             button_start: nwg::Button,
             button_cancel: nwg::Button,
         }
 
         let mut window = nwg::Window::default();
+        let mut label_welcome = nwg::Label::default();
         let mut label_room = nwg::Label::default();
         let mut input_room = nwg::TextInput::default();
         let mut label_server = nwg::Label::default();
         let mut input_server = nwg::TextInput::default();
         let mut label_device = nwg::Label::default();
         let mut input_device = nwg::TextInput::default();
+        let mut label_tip = nwg::Label::default();
         let mut button_start = nwg::Button::default();
         let mut button_cancel = nwg::Button::default();
 
-        let width = scale_px(520);
-        let height = scale_px(240);
+        let width = scale_px(460);
+        let height = scale_px(280);
+        let x = (nwg::Monitor::width() - width) / 2;
+        let y = (nwg::Monitor::height() - height) / 2;
 
         nwg::Window::builder()
-            .flags(nwg::WindowFlags::WINDOW)
+            .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE)
             .size((width, height))
-            .position((scale_px(220), scale_px(180)))
-            .title("ClipRelay Setup")
+            .position((x, y))
+            .title("ClipRelay - Setup")
             .build(&mut window)
             .map_err(|err| err.to_string())?;
 
         nwg::Label::builder()
+            .text("Welcome! Enter your room details to get started:")
+            .position((scale_px(16), scale_px(14)))
+            .size((width - scale_px(32), scale_px(24)))
+            .parent(&window)
+            .build(&mut label_welcome)
+            .map_err(|err| err.to_string())?;
+
+        nwg::Label::builder()
             .text("Room code:")
-            .position((scale_px(16), scale_px(18)))
-            .size((scale_px(120), scale_px(22)))
+            .position((scale_px(16), scale_px(52)))
+            .size((scale_px(100), scale_px(20)))
             .parent(&window)
             .build(&mut label_room)
             .map_err(|err| err.to_string())?;
 
         nwg::TextInput::builder()
             .text(&defaults.room_code)
-            .position((scale_px(140), scale_px(14)))
-            .size((width - scale_px(156), scale_px(28)))
+            .position((scale_px(120), scale_px(50)))
+            .size((width - scale_px(136), scale_px(26)))
             .parent(&window)
             .build(&mut input_room)
             .map_err(|err| err.to_string())?;
 
         nwg::Label::builder()
             .text("Server URL:")
-            .position((scale_px(16), scale_px(62)))
-            .size((scale_px(120), scale_px(22)))
+            .position((scale_px(16), scale_px(92)))
+            .size((scale_px(100), scale_px(20)))
             .parent(&window)
             .build(&mut label_server)
             .map_err(|err| err.to_string())?;
 
         nwg::TextInput::builder()
             .text(&defaults.server_url)
-            .position((scale_px(140), scale_px(58)))
-            .size((width - scale_px(156), scale_px(28)))
+            .position((scale_px(120), scale_px(90)))
+            .size((width - scale_px(136), scale_px(26)))
             .parent(&window)
             .build(&mut input_server)
             .map_err(|err| err.to_string())?;
 
         nwg::Label::builder()
             .text("Device name:")
-            .position((scale_px(16), scale_px(106)))
-            .size((scale_px(120), scale_px(22)))
+            .position((scale_px(16), scale_px(132)))
+            .size((scale_px(100), scale_px(20)))
             .parent(&window)
             .build(&mut label_device)
             .map_err(|err| err.to_string())?;
 
         nwg::TextInput::builder()
             .text(&defaults.device_name)
-            .position((scale_px(140), scale_px(102)))
-            .size((width - scale_px(156), scale_px(28)))
+            .position((scale_px(120), scale_px(130)))
+            .size((width - scale_px(136), scale_px(26)))
             .parent(&window)
             .build(&mut input_device)
             .map_err(|err| err.to_string())?;
 
+        nwg::Label::builder()
+            .text("Tip: Use the same room code on multiple devices to sync clipboards.")
+            .position((scale_px(16), scale_px(172)))
+            .size((width - scale_px(32), scale_px(40)))
+            .parent(&window)
+            .build(&mut label_tip)
+            .map_err(|err| err.to_string())?;
+
         nwg::Button::builder()
-            .text("Start")
-            .position((width - scale_px(210), height - scale_px(56)))
-            .size((scale_px(90), scale_px(32)))
+            .text("Connect")
+            .position((width - scale_px(196), height - scale_px(52)))
+            .size((scale_px(90), scale_px(34)))
             .parent(&window)
             .build(&mut button_start)
             .map_err(|err| err.to_string())?;
 
         nwg::Button::builder()
             .text("Cancel")
-            .position((width - scale_px(112), height - scale_px(56)))
-            .size((scale_px(90), scale_px(32)))
+            .position((width - scale_px(98), height - scale_px(52)))
+            .size((scale_px(90), scale_px(34)))
             .parent(&window)
             .build(&mut button_cancel)
             .map_err(|err| err.to_string())?;
 
         let ui = Rc::new(SetupUi {
             window,
+            _label_welcome: label_welcome,
             _label_room: label_room,
             input_room,
             _label_server: label_server,
             input_server,
             _label_device: label_device,
             input_device,
+            _label_tip: label_tip,
             button_start,
             button_cancel,
         });
