@@ -27,6 +27,10 @@ pub struct SavedUiState {
     pub options: Option<WindowPlacement>,
     #[serde(default)]
     pub popup: Option<WindowPlacement>,
+    /// Persisted global hotkey label (e.g. "Ctrl+Shift+V").
+    /// `None` or `"None"` means hotkey is disabled.
+    #[serde(default)]
+    pub hotkey: Option<String>,
 }
 
 #[derive(Debug)]

@@ -44,7 +44,7 @@ mod windows_client {
     use tracing_subscriber::fmt::MakeWriter;
     use url::Url;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
+        MOD_NOREPEAT, RegisterHotKey, UnregisterHotKey,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         HWND_NOTOPMOST, HWND_TOPMOST, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
@@ -162,10 +162,59 @@ mod windows_client {
     const FILE_CHUNK_RAW_BYTES: usize = 64 * 1024;
     const MAX_NOTIFICATIONS: usize = 20;
 
-    /// Global hotkey ID for Ctrl+Shift+V (open/toggle send window).
+    /// Global hotkey ID for opening the send window.
     const HOTKEY_ID_SEND_WINDOW: i32 = 1;
-    /// Virtual-key code for 'V'.
-    const VK_V: u32 = 0x56;
+
+    /// A predefined global hotkey option.
+    struct HotkeyPreset {
+        label: &'static str,
+        /// Win32 `HOT_KEY_MODIFIERS` flags (0 means disabled).
+        modifiers: u32,
+        /// Win32 virtual-key code (0 means disabled).
+        vk: u32,
+    }
+
+    /// Available hotkey presets shown in the options dropdown.
+    /// The first entry ("Ctrl+Shift+V") is the default.
+    const HOTKEY_PRESETS: &[HotkeyPreset] = &[
+        HotkeyPreset {
+            label: "Ctrl+Shift+V",
+            modifiers: 0x0002 | 0x0004, // MOD_CONTROL | MOD_SHIFT
+            vk: 0x56,                   // 'V'
+        },
+        HotkeyPreset {
+            label: "Ctrl+Shift+C",
+            modifiers: 0x0002 | 0x0004,
+            vk: 0x43, // 'C'
+        },
+        HotkeyPreset {
+            label: "Ctrl+Alt+V",
+            modifiers: 0x0002 | 0x0001, // MOD_CONTROL | MOD_ALT
+            vk: 0x56,
+        },
+        HotkeyPreset {
+            label: "Ctrl+Alt+C",
+            modifiers: 0x0002 | 0x0001,
+            vk: 0x43,
+        },
+        HotkeyPreset {
+            label: "Win+Shift+V",
+            modifiers: 0x0008 | 0x0004, // MOD_WIN | MOD_SHIFT
+            vk: 0x56,
+        },
+        HotkeyPreset {
+            label: "None",
+            modifiers: 0,
+            vk: 0,
+        },
+    ];
+
+    /// Default hotkey label when no saved preference exists.
+    const DEFAULT_HOTKEY_LABEL: &str = "Ctrl+Shift+V";
+
+    fn find_hotkey_preset(label: &str) -> Option<&'static HotkeyPreset> {
+        HOTKEY_PRESETS.iter().find(|p| p.label == label)
+    }
 
     #[derive(Debug)]
     enum UiEvent {
@@ -355,6 +404,8 @@ mod windows_client {
         options_info_box: nwg::TextBox,
         options_auto_apply_checkbox: nwg::CheckBox,
         options_autostart_checkbox: nwg::CheckBox,
+        options_hotkey_label: nwg::Label,
+        options_hotkey_combo: nwg::ComboBox<String>,
         options_error_label: nwg::Label,
         options_close_button: nwg::Button,
 
@@ -564,6 +615,7 @@ mod windows_client {
             let margin = scale_px(16);
             let gap = scale_px(10);
             let checkbox_h = scale_px(24);
+            let combo_h = scale_px(26);
             let btn_h = scale_px(36);
             let close_w = scale_px(110);
 
@@ -571,8 +623,8 @@ mod windows_client {
             let close_top = h - margin - btn_h;
             let error_h = scale_px(20);
 
-            // Reserve: 2 checkboxes + gap + error label + gap
-            let reserved = checkbox_h * 2 + error_h + gap * 3;
+            // Reserve: 2 checkboxes + hotkey row + error label + gaps
+            let reserved = checkbox_h * 2 + combo_h + error_h + gap * 4;
             let info_h = (close_top - reserved - info_top).max(scale_px(120));
             self.options_info_box.set_position(margin, info_top);
             self.options_info_box
@@ -592,7 +644,19 @@ mod windows_client {
                 checkbox_h as u32,
             );
 
-            let err_y = cb2_y + checkbox_h + gap;
+            let hotkey_y = cb2_y + checkbox_h + gap;
+            let label_w = scale_px(110);
+            self.options_hotkey_label
+                .set_position(margin, hotkey_y + scale_px(2));
+            self.options_hotkey_label
+                .set_size(label_w as u32, combo_h as u32);
+            let combo_x = margin + label_w + scale_px(4);
+            let combo_w = (w - combo_x - margin).max(scale_px(140));
+            self.options_hotkey_combo.set_position(combo_x, hotkey_y);
+            self.options_hotkey_combo
+                .set_size(combo_w as u32, combo_h as u32);
+
+            let err_y = hotkey_y + combo_h + gap;
             self.options_error_label.set_position(margin, err_y);
             self.options_error_label
                 .set_size((w - margin * 2).max(scale_px(120)) as u32, error_h as u32);
@@ -684,6 +748,8 @@ mod windows_client {
             let mut options_info_box = nwg::TextBox::default();
             let mut options_auto_apply_checkbox = nwg::CheckBox::default();
             let mut options_autostart_checkbox = nwg::CheckBox::default();
+            let mut options_hotkey_label = nwg::Label::default();
+            let mut options_hotkey_combo: nwg::ComboBox<String> = nwg::ComboBox::default();
             let mut options_error_label = nwg::Label::default();
             let mut options_close_button = nwg::Button::default();
 
@@ -824,8 +890,27 @@ mod windows_client {
                 .map_err(|err| err.to_string())?;
 
             nwg::Label::builder()
+                .text("Global hotkey:")
+                .position((scale_px(16), scale_px(306)))
+                .size((scale_px(110), scale_px(24)))
+                .parent(&options_window)
+                .build(&mut options_hotkey_label)
+                .map_err(|err| err.to_string())?;
+
+            let hotkey_items: Vec<String> =
+                HOTKEY_PRESETS.iter().map(|p| p.label.to_owned()).collect();
+            nwg::ComboBox::builder()
+                .collection(hotkey_items)
+                .position((scale_px(130), scale_px(304)))
+                .size((scale_px(200), scale_px(26)))
+                .parent(&options_window)
+                .selected_index(Some(0))
+                .build(&mut options_hotkey_combo)
+                .map_err(|err| err.to_string())?;
+
+            nwg::Label::builder()
                 .text("")
-                .position((scale_px(16), scale_px(304)))
+                .position((scale_px(16), scale_px(340)))
                 .size((options_width - scale_px(32), scale_px(20)))
                 .parent(&options_window)
                 .build(&mut options_error_label)
@@ -914,6 +999,8 @@ mod windows_client {
                 options_info_box,
                 options_auto_apply_checkbox,
                 options_autostart_checkbox,
+                options_hotkey_label,
+                options_hotkey_combo,
                 options_error_label,
                 options_close_button,
                 popup_window,
@@ -994,6 +1081,19 @@ mod windows_client {
                         nwg::CheckBoxState::Unchecked
                     },
                 );
+
+                // Set hotkey combo box to saved preference (or default).
+                let saved_label = app_mut
+                    .ui_state
+                    .hotkey
+                    .as_deref()
+                    .unwrap_or(DEFAULT_HOTKEY_LABEL);
+                let idx = HOTKEY_PRESETS
+                    .iter()
+                    .position(|p| p.label == saved_label)
+                    .unwrap_or(0);
+                app_mut.options_hotkey_combo.set_selection(Some(idx));
+
                 app_mut.refresh_ui_texts();
                 app_mut.refresh_status_indicator();
                 if !app_mut.config.background {
@@ -1001,28 +1101,41 @@ mod windows_client {
                 }
             }
 
-            // Register global hotkey (Ctrl+Shift+V) and bind raw WM_HOTKEY handler.
+            // Register global hotkey and bind raw WM_HOTKEY handler.
             {
                 let app_ref = app.borrow();
-                let hwnd = app_ref
-                    .app_window
-                    .handle
-                    .hwnd()
-                    .expect("app_window must have HWND");
-                let ok = unsafe {
-                    RegisterHotKey(
-                        hwnd as isize,
-                        HOTKEY_ID_SEND_WINDOW,
-                        MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
-                        VK_V,
-                    )
-                };
-                if ok == 0 {
-                    warn!(
-                        "Failed to register global hotkey Ctrl+Shift+V (another app may hold it)"
-                    );
-                } else {
-                    info!("Registered global hotkey Ctrl+Shift+V");
+
+                let saved_label = app_ref
+                    .ui_state
+                    .hotkey
+                    .as_deref()
+                    .unwrap_or(DEFAULT_HOTKEY_LABEL);
+                let preset = find_hotkey_preset(saved_label)
+                    .or_else(|| find_hotkey_preset(DEFAULT_HOTKEY_LABEL))
+                    .expect("DEFAULT_HOTKEY_LABEL must exist in HOTKEY_PRESETS");
+
+                if preset.vk != 0 {
+                    let hwnd = app_ref
+                        .app_window
+                        .handle
+                        .hwnd()
+                        .expect("app_window must have HWND");
+                    let ok = unsafe {
+                        RegisterHotKey(
+                            hwnd as isize,
+                            HOTKEY_ID_SEND_WINDOW,
+                            preset.modifiers | MOD_NOREPEAT,
+                            preset.vk,
+                        )
+                    };
+                    if ok == 0 {
+                        warn!(
+                            "Failed to register global hotkey {} (another app may hold it)",
+                            preset.label
+                        );
+                    } else {
+                        info!("Registered global hotkey {}", preset.label);
+                    }
                 }
 
                 let weak_hotkey = Rc::downgrade(&app);
@@ -1181,6 +1294,23 @@ mod windows_client {
                         }
                     }
                     self.refresh_ui_texts();
+                }
+                nwg::Event::OnComboxBoxSelection if handle == self.options_hotkey_combo.handle => {
+                    if let Some(idx) = self.options_hotkey_combo.selection()
+                        && let Some(preset) = HOTKEY_PRESETS.get(idx)
+                    {
+                        self.re_register_hotkey(preset);
+                        self.ui_state.hotkey = Some(preset.label.to_owned());
+                        self.maybe_save_ui_state();
+                        if preset.vk != 0 {
+                            self.show_tray_info(
+                                "ClipRelay",
+                                &format!("Hotkey changed to {}", preset.label),
+                            );
+                        } else {
+                            self.show_tray_info("ClipRelay", "Global hotkey disabled");
+                        }
+                    }
                 }
                 nwg::Event::OnButtonClick if handle == self.options_close_button.handle => {
                     self.options_window.set_visible(false);
@@ -1454,6 +1584,39 @@ mod windows_client {
             let flags =
                 nwg::TrayNotificationFlags::USER_ICON | nwg::TrayNotificationFlags::LARGE_ICON;
             self.tray.show(text, Some(title), Some(flags), Some(icon));
+        }
+
+        /// Unregister the current global hotkey (if any) and register a new
+        /// one matching `preset`.  If the preset is "None" (vk == 0) the
+        /// hotkey is simply disabled.
+        fn re_register_hotkey(&self, preset: &HotkeyPreset) {
+            if let Some(hwnd) = self.app_window.handle.hwnd() {
+                let hwnd = hwnd as isize;
+                // Always unregister first — safe even if none was registered.
+                unsafe {
+                    UnregisterHotKey(hwnd, HOTKEY_ID_SEND_WINDOW);
+                }
+                if preset.vk != 0 {
+                    let ok = unsafe {
+                        RegisterHotKey(
+                            hwnd,
+                            HOTKEY_ID_SEND_WINDOW,
+                            preset.modifiers | MOD_NOREPEAT,
+                            preset.vk,
+                        )
+                    };
+                    if ok == 0 {
+                        warn!(
+                            "Failed to register hotkey {} (another app may hold it)",
+                            preset.label
+                        );
+                    } else {
+                        info!("Registered global hotkey {}", preset.label);
+                    }
+                } else {
+                    info!("Global hotkey disabled");
+                }
+            }
         }
 
         fn toggle_send_window(&mut self) {
