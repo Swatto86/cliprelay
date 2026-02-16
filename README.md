@@ -5,7 +5,7 @@ ClipRelay is an end-to-end encrypted, relay-based clipboard sync tool for text.
 - Clients connect outbound over WebSocket (`ws://` or `wss://`) to a relay.
 - Clipboard text is encrypted client-side with XChaCha20-Poly1305.
 - Relay only forwards opaque encrypted payloads and cannot decrypt clipboard content.
-- Clients in the same room receive popup notifications and can apply text to their clipboard.
+- Windows clients use a native WinAPI tray-first UI (`native-windows-gui`) with red/amber/green tray status indicators, tray balloon notifications, and a DPI-aware popup for apply/dismiss actions.
 
 ## Repository Model
 
@@ -131,8 +131,8 @@ Run a second client with the same room code and another device name.
 1. Start relay.
 2. Launch client A and client B with the same room code.
 3. Copy text on client A.
-4. Client B receives a non-blocking popup showing preview text.
-5. Click **Apply to clipboard** (or enable **Auto apply clipboard**).
+4. Client B receives a tray notification and an on-screen popup showing a preview.
+5. Left-click the tray icon to open the send UI, right-click for **Options** and **Quit**.
 
 ## Notes for Deployment
 
