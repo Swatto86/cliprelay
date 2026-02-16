@@ -16,7 +16,7 @@ mod windows_client {
 
     use std::{
         cell::RefCell,
-        collections::HashMap,
+        collections::{HashMap, VecDeque},
         fs::{File, OpenOptions},
         io::{self, Write},
         path::PathBuf,
@@ -195,6 +195,84 @@ mod windows_client {
         },
     }
 
+    const MAX_HISTORY_ENTRIES: usize = 200;
+
+    #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+    enum ActivityDirection {
+        Sent,
+        Received,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct ActivityEntry {
+        ts_unix_ms: u64,
+        direction: ActivityDirection,
+        peer_device_id: String,
+        kind: String,
+        summary: String,
+    }
+
+    fn history_path() -> PathBuf {
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let dir = base.join("ClipRelay");
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join("history.json")
+    }
+
+    fn load_history() -> VecDeque<ActivityEntry> {
+        let path = history_path();
+        let Ok(data) = std::fs::read_to_string(&path) else {
+            return VecDeque::new();
+        };
+        let Ok(mut entries) = serde_json::from_str::<Vec<ActivityEntry>>(&data) else {
+            return VecDeque::new();
+        };
+        // Keep most-recent first.
+        entries.sort_by(|a, b| b.ts_unix_ms.cmp(&a.ts_unix_ms));
+        entries.truncate(MAX_HISTORY_ENTRIES);
+        VecDeque::from(entries)
+    }
+
+    fn save_history(history: &VecDeque<ActivityEntry>) {
+        const MAX_ATTEMPTS: u32 = 3;
+        const BACKOFF_BASE_MS: u64 = 50;
+
+        let path = history_path();
+        let tmp = path.with_extension("json.tmp");
+
+        let entries: Vec<ActivityEntry> = history.iter().take(MAX_HISTORY_ENTRIES).cloned().collect();
+        let Ok(payload) = serde_json::to_string_pretty(&entries) else {
+            return;
+        };
+
+        for attempt in 1..=MAX_ATTEMPTS {
+            let result: Result<(), String> = (|| {
+                std::fs::write(&tmp, payload.as_bytes())
+                    .map_err(|e| format!("failed to write {}: {e}", tmp.display()))?;
+                if path.exists() {
+                    let _ = std::fs::remove_file(&path);
+                }
+                std::fs::rename(&tmp, &path)
+                    .map_err(|e| format!("failed to move history into place {}: {e}", path.display()))?;
+                Ok(())
+            })();
+
+            match result {
+                Ok(()) => return,
+                Err(err) => {
+                    if attempt >= MAX_ATTEMPTS {
+                        warn!("failed to save history: {err}");
+                        return;
+                    }
+                    let backoff_ms = BACKOFF_BASE_MS.saturating_mul(1_u64 << (attempt - 1));
+                    std::thread::sleep(Duration::from_millis(backoff_ms));
+                }
+            }
+        }
+    }
+
     #[derive(Debug, Clone)]
     struct SharedRuntimeState {
         room_key: Arc<Mutex<Option<[u8; 32]>>>,
@@ -264,9 +342,162 @@ mod windows_client {
         tray_status: TrayStatus,
 
         last_tray_click_ms: Option<u64>,
+
+        history: VecDeque<ActivityEntry>,
     }
 
     impl ClipRelayTrayApp {
+        fn push_history(&mut self, entry: ActivityEntry) {
+            self.history.push_front(entry);
+            while self.history.len() > MAX_HISTORY_ENTRIES {
+                self.history.pop_back();
+            }
+            save_history(&self.history);
+        }
+
+        fn format_history_for_options(&self, max_lines: usize) -> String {
+            let mut out = String::new();
+            out.push_str("\r\n\r\nRecent activity (latest first):\r\n");
+
+            if self.history.is_empty() {
+                out.push_str("(no activity yet)\r\n");
+                return out;
+            }
+
+            for (idx, entry) in self.history.iter().take(max_lines).enumerate() {
+                let dir = match entry.direction {
+                    ActivityDirection::Sent => "SENT",
+                    ActivityDirection::Received => "RECV",
+                };
+                out.push_str(&format!(
+                    "{}. [{}] {} {}: {}\r\n",
+                    idx + 1,
+                    entry.ts_unix_ms,
+                    dir,
+                    entry.kind,
+                    entry.summary
+                ));
+            }
+
+            out
+        }
+
+        fn layout_send_window(&self) {
+            let (w, h) = self.send_window.size();
+            let w = w as i32;
+            let h = h as i32;
+
+            let margin = scale_px(16);
+            let gap = scale_px(8);
+            let status_h = scale_px(24);
+            let btn_h = scale_px(36);
+            let btn_w = scale_px(180);
+
+            self.send_status_label
+                .set_position(margin, margin);
+            self.send_status_label
+                .set_size((w - margin * 2).max(scale_px(100)) as u32, status_h as u32);
+
+            let text_top = margin + status_h + gap;
+            let buttons_top = h - margin - btn_h;
+            let text_h = (buttons_top - gap - text_top).max(scale_px(120));
+            self.send_text_box.set_position(margin, text_top);
+            self.send_text_box
+                .set_size((w - margin * 2).max(scale_px(120)) as u32, text_h as u32);
+
+            self.send_button
+                .set_position(margin, buttons_top);
+            self.send_button.set_size(btn_w as u32, btn_h as u32);
+
+            let file_x = (w - margin - btn_w).max(margin);
+            self.send_file_button
+                .set_position(file_x, buttons_top);
+            self.send_file_button.set_size(btn_w as u32, btn_h as u32);
+        }
+
+        fn layout_options_window(&self) {
+            let (w, h) = self.options_window.size();
+            let w = w as i32;
+            let h = h as i32;
+
+            let margin = scale_px(16);
+            let gap = scale_px(10);
+            let checkbox_h = scale_px(24);
+            let btn_h = scale_px(36);
+            let close_w = scale_px(110);
+
+            let info_top = margin;
+            let close_top = h - margin - btn_h;
+            let error_h = scale_px(20);
+
+            // Reserve: 2 checkboxes + gap + error label + gap
+            let reserved = checkbox_h * 2 + error_h + gap * 3;
+            let info_h = (close_top - reserved - info_top).max(scale_px(120));
+            self.options_info_box.set_position(margin, info_top);
+            self.options_info_box
+                .set_size((w - margin * 2).max(scale_px(120)) as u32, info_h as u32);
+
+            let cb1_y = info_top + info_h + gap;
+            self.options_auto_apply_checkbox
+                .set_position(margin, cb1_y);
+            self.options_auto_apply_checkbox
+                .set_size((w - margin * 2).max(scale_px(120)) as u32, checkbox_h as u32);
+
+            let cb2_y = cb1_y + checkbox_h + gap;
+            self.options_autostart_checkbox
+                .set_position(margin, cb2_y);
+            self.options_autostart_checkbox
+                .set_size((w - margin * 2).max(scale_px(120)) as u32, checkbox_h as u32);
+
+            let err_y = cb2_y + checkbox_h + gap;
+            self.options_error_label
+                .set_position(margin, err_y);
+            self.options_error_label
+                .set_size((w - margin * 2).max(scale_px(120)) as u32, error_h as u32);
+
+            let close_x = (w - margin - close_w).max(margin);
+            self.options_close_button
+                .set_position(close_x, close_top);
+            self.options_close_button
+                .set_size(close_w as u32, btn_h as u32);
+        }
+
+        fn layout_popup_window(&self) {
+            let (w, h) = self.popup_window.size();
+            let w = w as i32;
+            let h = h as i32;
+
+            let margin = scale_px(16);
+            let gap = scale_px(8);
+            let label_h = scale_px(24);
+            let btn_h = scale_px(36);
+            let btn_w_left = scale_px(220);
+            let btn_w_right = scale_px(180);
+
+            self.popup_sender_label
+                .set_position(margin, margin);
+            self.popup_sender_label
+                .set_size((w - margin * 2).max(scale_px(120)) as u32, label_h as u32);
+
+            let text_top = margin + label_h + gap;
+            let buttons_top = h - margin - btn_h;
+            let text_h = (buttons_top - gap - text_top).max(scale_px(80));
+            self.popup_text_box.set_position(margin, text_top);
+            self.popup_text_box
+                .set_size((w - margin * 2).max(scale_px(120)) as u32, text_h as u32);
+
+            self.popup_apply_button
+                .set_position(margin, buttons_top);
+            self.popup_apply_button
+                .set_size(btn_w_left as u32, btn_h as u32);
+
+            let dismiss_x = (w - margin - btn_w_right).max(margin);
+            self.popup_dismiss_button
+                .set_position(dismiss_x, buttons_top);
+            self.popup_dismiss_button
+                .set_size(btn_w_right as u32, btn_h as u32);
+        }
+
         fn build(config: ClientConfig) -> Result<Rc<RefCell<Self>>, String> {
             let runtime =
                 Runtime::new().map_err(|err| format!("tokio runtime init failed: {err}"))?;
@@ -278,6 +509,8 @@ mod windows_client {
                 last_applied_hash: Arc::new(Mutex::new(None)),
                 auto_apply: Arc::new(Mutex::new(false)),
             };
+
+            let history = load_history();
 
             #[cfg(not(test))]
             runtime.spawn(run_client_runtime(
@@ -560,7 +793,15 @@ mod windows_client {
                 },
                 tray_status: TrayStatus::Amber,
                 last_tray_click_ms: None,
+                history,
             }));
+
+            {
+                let app_ref = app.borrow();
+                app_ref.layout_send_window();
+                app_ref.layout_options_window();
+                app_ref.layout_popup_window();
+            }
 
             let weak: Weak<RefCell<Self>> = Rc::downgrade(&app);
             let window_handles = {
@@ -614,6 +855,15 @@ mod windows_client {
 
         fn handle_event(&mut self, event: nwg::Event, handle: nwg::ControlHandle) {
             match event {
+                nwg::Event::OnResize if handle == self.send_window.handle => {
+                    self.layout_send_window();
+                }
+                nwg::Event::OnResize if handle == self.options_window.handle => {
+                    self.layout_options_window();
+                }
+                nwg::Event::OnResize if handle == self.popup_window.handle => {
+                    self.layout_popup_window();
+                }
                 nwg::Event::OnTimerTick if handle == self.poll_timer.handle => {
                     self.poll_ui_events();
                 }
@@ -748,6 +998,14 @@ mod windows_client {
                         text,
                         content_hash,
                     } => {
+                        self.push_history(ActivityEntry {
+                            ts_unix_ms: now_unix_ms(),
+                            direction: ActivityDirection::Received,
+                            peer_device_id: sender_device_id.clone(),
+                            kind: "text".to_owned(),
+                            summary: preview_text(&text, 140),
+                        });
+
                         if self.state.auto_apply {
                             if let Err(err) = apply_clipboard_text(&text) {
                                 warn!("failed auto-apply clipboard: {}", err);
@@ -783,6 +1041,14 @@ mod windows_client {
                         temp_path,
                         size_bytes,
                     } => {
+                        self.push_history(ActivityEntry {
+                            ts_unix_ms: now_unix_ms(),
+                            direction: ActivityDirection::Received,
+                            peer_device_id: sender_device_id.clone(),
+                            kind: "file".to_owned(),
+                            summary: format!("{} ({} bytes)", file_name, size_bytes),
+                        });
+
                         let preview = format!(
                             "File: {}\r\nSize: {} bytes\r\n\r\nClick Save to store it in Downloads\\ClipRelay.",
                             file_name, size_bytes
@@ -897,7 +1163,7 @@ mod windows_client {
                     nwg::CheckBoxState::Unchecked
                 });
 
-            let options_text = format!(
+            let mut options_text = format!(
                 "Server URL: {}\r\nRoom code: {}\r\nRoom ID: {}\r\nDevice name: {}\r\nDevice id: {}\r\nLast counter (persisted): {}\r\nConnection: {}\r\nPeers: {}\r\nRoom key ready: {}\r\nLast sent: {}\r\nLast received: {}",
                 self.config.server_url,
                 self.config.room_code,
@@ -921,6 +1187,8 @@ mod windows_client {
                     .map(|x| x.to_string())
                     .unwrap_or_else(|| "-".to_owned())
             );
+
+            options_text.push_str(&self.format_history_for_options(30));
             self.options_info_box.set_text(&options_text);
 
             let error_line = self
@@ -964,6 +1232,8 @@ mod windows_client {
             self.send_window.set_visible(true);
             self.send_window.set_focus();
 
+            self.layout_send_window();
+
             // Bring window to foreground reliably.
             // `SetForegroundWindow` alone can be flaky depending on focus rules/minimized state.
             if let Some(hwnd) = self.send_window.handle.hwnd() {
@@ -986,6 +1256,8 @@ mod windows_client {
                 self.options_window.set_visible(true);
             }
             self.options_window.set_focus();
+
+            self.layout_options_window();
         }
 
         fn send_manual_clipboard(&mut self) {
@@ -1026,6 +1298,14 @@ mod windows_client {
                 self.show_tray_info("ClipRelay", "Send failed: runtime not available");
                 return;
             }
+
+            self.push_history(ActivityEntry {
+                ts_unix_ms: now_unix_ms(),
+                direction: ActivityDirection::Sent,
+                peer_device_id: "room".to_owned(),
+                kind: "text".to_owned(),
+                summary: preview_text(&self.send_text_box.text(), 120),
+            });
 
             self.send_text_box.set_text("");
             self.show_tray_info("ClipRelay", "Sent to connected devices");
@@ -1079,6 +1359,14 @@ mod windows_client {
                 self.show_tray_info("ClipRelay", "Send failed: runtime not available");
                 return;
             }
+
+            self.push_history(ActivityEntry {
+                ts_unix_ms: now_unix_ms(),
+                direction: ActivityDirection::Sent,
+                peer_device_id: "room".to_owned(),
+                kind: "file".to_owned(),
+                summary: format!("{}", path.display()),
+            });
 
             self.show_tray_info(
                 "ClipRelay",
