@@ -43,9 +43,12 @@ mod windows_client {
     use tracing::{error, info, warn};
     use tracing_subscriber::fmt::MakeWriter;
     use url::Url;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         HWND_NOTOPMOST, HWND_TOPMOST, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
-        SetForegroundWindow, SetWindowPos, ShowWindow,
+        SetForegroundWindow, SetWindowPos, ShowWindow, WM_HOTKEY,
     };
 
     use cliprelay_client::autostart;
@@ -158,6 +161,11 @@ mod windows_client {
     const MAX_TOTAL_CHUNKS: u32 = 256;
     const FILE_CHUNK_RAW_BYTES: usize = 64 * 1024;
     const MAX_NOTIFICATIONS: usize = 20;
+
+    /// Global hotkey ID for Ctrl+Shift+V (open/toggle send window).
+    const HOTKEY_ID_SEND_WINDOW: i32 = 1;
+    /// Virtual-key code for 'V'.
+    const VK_V: u32 = 0x56;
 
     #[derive(Debug)]
     enum UiEvent {
@@ -358,6 +366,7 @@ mod windows_client {
 
         poll_timer: nwg::AnimationTimer,
         event_handlers: Vec<nwg::EventHandler>,
+        raw_hotkey_handler: Option<nwg::RawEventHandler>,
 
         config: ClientConfig,
         state: ClientUiState,
@@ -914,6 +923,7 @@ mod windows_client {
                 popup_dismiss_button,
                 poll_timer,
                 event_handlers: Vec::new(),
+                raw_hotkey_handler: None,
                 config,
                 state: ClientUiState {
                     _runtime: runtime,
@@ -989,6 +999,51 @@ mod windows_client {
                 if !app_mut.config.background {
                     app_mut.show_startup_notification();
                 }
+            }
+
+            // Register global hotkey (Ctrl+Shift+V) and bind raw WM_HOTKEY handler.
+            {
+                let app_ref = app.borrow();
+                let hwnd = app_ref
+                    .app_window
+                    .handle
+                    .hwnd()
+                    .expect("app_window must have HWND");
+                let ok = unsafe {
+                    RegisterHotKey(
+                        hwnd as isize,
+                        HOTKEY_ID_SEND_WINDOW,
+                        MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
+                        VK_V,
+                    )
+                };
+                if ok == 0 {
+                    warn!(
+                        "Failed to register global hotkey Ctrl+Shift+V (another app may hold it)"
+                    );
+                } else {
+                    info!("Registered global hotkey Ctrl+Shift+V");
+                }
+
+                let weak_hotkey = Rc::downgrade(&app);
+                let raw_handler = nwg::bind_raw_event_handler(
+                    &app_ref.app_window.handle,
+                    0x10000, // handler_id > 0xFFFF as required by NWG
+                    move |_hwnd, msg, wparam, _lparam| {
+                        if msg == WM_HOTKEY
+                            && wparam as i32 == HOTKEY_ID_SEND_WINDOW
+                            && let Some(app) = weak_hotkey.upgrade()
+                            && let Ok(mut app_mut) = app.try_borrow_mut()
+                        {
+                            app_mut.toggle_send_window();
+                        }
+                        None // let default processing continue
+                    },
+                )
+                .expect("failed to bind raw hotkey handler");
+
+                drop(app_ref);
+                app.borrow_mut().raw_hotkey_handler = Some(raw_handler);
             }
 
             Ok(app)
@@ -1198,9 +1253,10 @@ mod windows_client {
                                     .state
                                     .runtime_cmd_tx
                                     .send(RuntimeCommand::MarkApplied(content_hash));
+                                let name = self.resolve_peer_name(&sender_device_id);
                                 self.show_tray_info(
                                     "ClipRelay",
-                                    &format!("Clipboard auto-applied from {}", sender_device_id),
+                                    &format!("Clipboard auto-applied from {}", name),
                                 );
                             }
                             continue;
@@ -1213,10 +1269,8 @@ mod windows_client {
                             content_hash,
                         });
 
-                        self.show_tray_info(
-                            "Clipboard received",
-                            &format!("From {}", sender_device_id),
-                        );
+                        let name = self.resolve_peer_name(&sender_device_id);
+                        self.show_tray_info("Clipboard received", &format!("From {}", name));
                         self.show_popup_if_needed();
                     }
                     UiEvent::IncomingFile {
@@ -1244,7 +1298,8 @@ mod windows_client {
                             temp_path,
                         });
 
-                        self.show_tray_info("File received", &format!("From {}", sender_device_id));
+                        let name = self.resolve_peer_name(&sender_device_id);
+                        self.show_tray_info("File received", &format!("From {}", name));
                         self.show_popup_if_needed();
                     }
                     UiEvent::RuntimeError(message) => {
@@ -1565,6 +1620,17 @@ mod windows_client {
             self.state.notifications.push(n);
         }
 
+        /// Look up the human-readable device name for a given device ID.
+        /// Falls back to the raw `device_id` if no matching peer is found.
+        fn resolve_peer_name(&self, device_id: &str) -> String {
+            self.state
+                .peers
+                .iter()
+                .find(|p| p.device_id == device_id)
+                .map(|p| p.device_name.clone())
+                .unwrap_or_else(|| device_id.to_string())
+        }
+
         fn show_popup_if_needed(&mut self) {
             if self.state.notifications.is_empty() {
                 if self.popup_window.visible() {
@@ -1582,8 +1648,8 @@ mod windows_client {
                         preview,
                         ..
                     } => {
-                        self.popup_sender_label
-                            .set_text(&format!("From: {}", sender_device_id));
+                        let name = self.resolve_peer_name(sender_device_id);
+                        self.popup_sender_label.set_text(&format!("From: {}", name));
                         self.popup_text_box.set_text(preview);
                         self.popup_apply_button.set_text("Apply");
                     }
@@ -1592,8 +1658,8 @@ mod windows_client {
                         preview,
                         ..
                     } => {
-                        self.popup_sender_label
-                            .set_text(&format!("From: {}", sender_device_id));
+                        let name = self.resolve_peer_name(sender_device_id);
+                        self.popup_sender_label.set_text(&format!("From: {}", name));
                         self.popup_text_box.set_text(preview);
                         self.popup_apply_button.set_text("Save");
                     }
@@ -1633,9 +1699,10 @@ mod windows_client {
                             .state
                             .runtime_cmd_tx
                             .send(RuntimeCommand::MarkApplied(content_hash));
+                        let name = self.resolve_peer_name(&sender_device_id);
                         self.show_tray_info(
                             "ClipRelay",
-                            &format!("Clipboard applied from {}", sender_device_id),
+                            &format!("Clipboard applied from {}", name),
                         );
                     }
                 }
@@ -1647,9 +1714,10 @@ mod windows_client {
                 } => match save_temp_file_to_downloads(&temp_path, &file_name) {
                     Ok(dest) => {
                         let _ = std::fs::remove_file(&temp_path);
+                        let name = self.resolve_peer_name(&sender_device_id);
                         self.show_tray_info(
                             "ClipRelay",
-                            &format!("Saved file from {} to {}", sender_device_id, dest.display()),
+                            &format!("Saved file from {} to {}", name, dest.display()),
                         );
                     }
                     Err(err) => {
@@ -1678,6 +1746,16 @@ mod windows_client {
 
     impl Drop for ClipRelayTrayApp {
         fn drop(&mut self) {
+            // Unregister global hotkey.
+            if let Some(hwnd) = self.app_window.handle.hwnd() {
+                unsafe {
+                    UnregisterHotKey(hwnd as isize, HOTKEY_ID_SEND_WINDOW);
+                }
+            }
+            // Unbind raw hotkey handler.
+            if let Some(handler) = self.raw_hotkey_handler.take() {
+                let _ = nwg::unbind_raw_event_handler(&handler);
+            }
             for handler in self.event_handlers.drain(..) {
                 nwg::unbind_event_handler(&handler);
             }
