@@ -116,10 +116,7 @@ pub fn load_ui_state_from_path(path: &Path) -> Result<SavedUiState, UiStateLoadE
 
 pub fn load_ui_state() -> SavedUiState {
     let path = ui_state_path();
-    match load_ui_state_from_path(&path) {
-        Ok(s) => s,
-        Err(_) => SavedUiState::default(),
-    }
+    load_ui_state_from_path(&path).unwrap_or_default()
 }
 
 pub fn save_ui_state_to_path(path: &Path, state: &SavedUiState) -> Result<(), UiStateSaveError> {

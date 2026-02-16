@@ -86,7 +86,6 @@ impl TokenBucket {
     }
 }
 
-#[must_use]
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/ws", get(ws_handler))

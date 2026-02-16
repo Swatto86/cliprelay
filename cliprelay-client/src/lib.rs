@@ -143,7 +143,7 @@ pub mod autostart {
             return Err(AutostartError::RegQueryData { status });
         }
 
-        if buf.len() % 2 != 0 {
+        if !buf.len().is_multiple_of(2) {
             return Ok(None);
         }
         let mut utf16: Vec<u16> = Vec::with_capacity(buf.len() / 2);

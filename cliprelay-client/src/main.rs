@@ -19,7 +19,7 @@ mod windows_client {
         collections::{HashMap, VecDeque},
         fs::{File, OpenOptions},
         io::{self, Write},
-        path::PathBuf,
+        path::{Path, PathBuf},
         rc::{Rc, Weak},
         sync::{Arc, Mutex},
         time::{Duration, SystemTime, UNIX_EPOCH},
@@ -66,7 +66,7 @@ mod windows_client {
             let mut locked = self
                 .file
                 .lock()
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "log file lock poisoned"))?;
+                .map_err(|_| io::Error::other("log file lock poisoned"))?;
             locked.write(buf)
         }
 
@@ -74,7 +74,7 @@ mod windows_client {
             let mut locked = self
                 .file
                 .lock()
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "log file lock poisoned"))?;
+                .map_err(|_| io::Error::other("log file lock poisoned"))?;
             locked.flush()
         }
     }
@@ -475,42 +475,45 @@ mod windows_client {
         fn restore_send_window_placement(&self) {
             let min_w = scale_px(420) as u32;
             let min_h = scale_px(320) as u32;
+            let default_w = scale_px(480) as u32;
+            let default_h = scale_px(360) as u32;
 
-            let placement = self.ui_state.send.unwrap_or_else(|| {
-                let w = scale_px(480) as u32;
-                let h = scale_px(360) as u32;
-                let x = (nwg::Monitor::width() - w as i32) / 2;
-                let y = (nwg::Monitor::height() - h as i32) / 2;
-                WindowPlacement { x, y, w, h }
-            });
+            // Use saved size if available, but always center on screen.
+            let w = self.ui_state.send.map_or(default_w, |p| p.w);
+            let h = self.ui_state.send.map_or(default_h, |p| p.h);
+            let x = (nwg::Monitor::width() - w as i32) / 2;
+            let y = (nwg::Monitor::height() - h as i32) / 2;
+            let placement = WindowPlacement { x, y, w, h };
             self.apply_restored_placement(&self.send_window, placement, min_w, min_h);
         }
 
         fn restore_options_window_placement(&self) {
             let min_w = scale_px(ui_layout::OPTIONS_MIN_W_PX) as u32;
             let min_h = scale_px(ui_layout::OPTIONS_MIN_H_PX) as u32;
+            let default_w = scale_px(ui_layout::OPTIONS_DEFAULT_W_PX) as u32;
+            let default_h = scale_px(ui_layout::OPTIONS_DEFAULT_H_PX) as u32;
 
-            let placement = self.ui_state.options.unwrap_or_else(|| {
-                let w = scale_px(ui_layout::OPTIONS_DEFAULT_W_PX) as u32;
-                let h = scale_px(ui_layout::OPTIONS_DEFAULT_H_PX) as u32;
-                let x = (nwg::Monitor::width() - w as i32) / 2;
-                let y = (nwg::Monitor::height() - h as i32) / 2;
-                WindowPlacement { x, y, w, h }
-            });
+            // Use saved size if available, but always center on screen.
+            let w = self.ui_state.options.map_or(default_w, |p| p.w);
+            let h = self.ui_state.options.map_or(default_h, |p| p.h);
+            let x = (nwg::Monitor::width() - w as i32) / 2;
+            let y = (nwg::Monitor::height() - h as i32) / 2;
+            let placement = WindowPlacement { x, y, w, h };
             self.apply_restored_placement(&self.options_window, placement, min_w, min_h);
         }
 
         fn restore_popup_window_placement(&self) {
             let min_w = scale_px(420) as u32;
             let min_h = scale_px(240) as u32;
+            let default_w = scale_px(480) as u32;
+            let default_h = scale_px(280) as u32;
 
-            let placement = self.ui_state.popup.unwrap_or_else(|| {
-                let w = scale_px(480) as u32;
-                let h = scale_px(280) as u32;
-                let x = (nwg::Monitor::width() - w as i32) / 2;
-                let y = (nwg::Monitor::height() - h as i32) / 2;
-                WindowPlacement { x, y, w, h }
-            });
+            // Use saved size if available, but always center on screen.
+            let w = self.ui_state.popup.map_or(default_w, |p| p.w);
+            let h = self.ui_state.popup.map_or(default_h, |p| p.h);
+            let x = (nwg::Monitor::width() - w as i32) / 2;
+            let y = (nwg::Monitor::height() - h as i32) / 2;
+            let placement = WindowPlacement { x, y, w, h };
             self.apply_restored_placement(&self.popup_window, placement, min_w, min_h);
         }
 
@@ -769,8 +772,8 @@ mod windows_client {
                 .build(&mut send_file_button)
                 .map_err(|err| err.to_string())?;
 
-            let options_width = scale_px(ui_layout::OPTIONS_DEFAULT_W_PX)
-                .min(nwg::Monitor::width() - scale_px(40));
+            let options_width =
+                scale_px(ui_layout::OPTIONS_DEFAULT_W_PX).min(nwg::Monitor::width() - scale_px(40));
             let options_height = scale_px(ui_layout::OPTIONS_DEFAULT_H_PX)
                 .min(nwg::Monitor::height() - scale_px(40));
             let options_x = (nwg::Monitor::width() - options_width) / 2;
@@ -945,10 +948,10 @@ mod windows_client {
             let window_handles = {
                 let app_ref = app.borrow();
                 vec![
-                    app_ref.app_window.handle.clone(),
-                    app_ref.send_window.handle.clone(),
-                    app_ref.options_window.handle.clone(),
-                    app_ref.popup_window.handle.clone(),
+                    app_ref.app_window.handle,
+                    app_ref.send_window.handle,
+                    app_ref.options_window.handle,
+                    app_ref.popup_window.handle,
                 ]
             };
 
@@ -958,10 +961,10 @@ mod windows_client {
                 let handler = nwg::full_bind_event_handler(
                     &window_handle,
                     move |event, _evt_data, handle| {
-                        if let Some(app) = weak.upgrade() {
-                            if let Ok(mut app_mut) = app.try_borrow_mut() {
-                                app_mut.handle_event(event, handle);
-                            }
+                        if let Some(app) = weak.upgrade()
+                            && let Ok(mut app_mut) = app.try_borrow_mut()
+                        {
+                            app_mut.handle_event(event, handle);
                         }
                     },
                 );
@@ -1361,11 +1364,11 @@ mod windows_client {
                 },
                 self.state
                     .last_sent_time
-                    .map(|x| format_timestamp_local(x))
+                    .map(format_timestamp_local)
                     .unwrap_or_else(|| "-".to_owned()),
                 self.state
                     .last_received_time
-                    .map(|x| format_timestamp_local(x))
+                    .map(format_timestamp_local)
                     .unwrap_or_else(|| "-".to_owned())
             );
 
@@ -2106,23 +2109,27 @@ mod windows_client {
 
             // Title at top.
             ui.label_title.set_position(margin, margin);
-            ui.label_title.set_size((w - margin * 2).max(scale_px(100)) as u32, title_h as u32);
+            ui.label_title
+                .set_size((w - margin * 2).max(scale_px(100)) as u32, title_h as u32);
 
             // Info label fills the space between title and buttons.
             let info_top = margin + title_h + gap;
             let btn_top = h - margin - btn_h;
             let info_h = (btn_top - gap - info_top).max(scale_px(48));
             ui.label_info.set_position(margin, info_top);
-            ui.label_info.set_size((w - margin * 2).max(scale_px(100)) as u32, info_h as u32);
+            ui.label_info
+                .set_size((w - margin * 2).max(scale_px(100)) as u32, info_h as u32);
 
             // Buttons at bottom.
             if ui.has_saved {
                 let btn_w = ((w - margin * 2 - gap * 2) / 3).max(scale_px(120));
                 ui.button_use_saved.set_position(margin, btn_top);
                 ui.button_use_saved.set_size(btn_w as u32, btn_h as u32);
-                ui.button_setup_new.set_position(margin + btn_w + gap, btn_top);
+                ui.button_setup_new
+                    .set_position(margin + btn_w + gap, btn_top);
                 ui.button_setup_new.set_size(btn_w as u32, btn_h as u32);
-                ui.button_cancel.set_position(margin + (btn_w + gap) * 2, btn_top);
+                ui.button_cancel
+                    .set_position(margin + (btn_w + gap) * 2, btn_top);
                 ui.button_cancel.set_size(btn_w as u32, btn_h as u32);
             } else {
                 let btn_w = ((w - margin * 2 - gap) / 2).max(scale_px(140));
@@ -2321,14 +2328,14 @@ mod windows_client {
 
         let ui = Rc::new(SetupUi {
             window,
-            label_welcome: label_welcome,
-            label_room: label_room,
+            label_welcome,
+            label_room,
             input_room,
-            label_server: label_server,
+            label_server,
             input_server,
-            label_device: label_device,
+            label_device,
             input_device,
-            label_tip: label_tip,
+            label_tip,
             button_start,
             button_cancel,
         });
@@ -2353,7 +2360,8 @@ mod windows_client {
             let mut y = margin;
 
             ui.label_welcome.set_position(margin, y);
-            ui.label_welcome.set_size(content_w as u32, scale_px(24) as u32);
+            ui.label_welcome
+                .set_size(content_w as u32, scale_px(24) as u32);
             y += scale_px(24) + gap;
 
             ui.label_room.set_position(margin, y + scale_px(3));
@@ -2906,7 +2914,11 @@ mod windows_client {
                     };
 
                     *counter = counter.saturating_add(1);
-                    info!(counter = *counter, bytes = text.len(), "queueing encrypted text send");
+                    info!(
+                        counter = *counter,
+                        bytes = text.len(),
+                        "queueing encrypted text send"
+                    );
                     let plaintext = ClipboardEventPlaintext {
                         sender_device_id: config.device_id.clone(),
                         counter: *counter,
@@ -3123,27 +3135,27 @@ mod windows_client {
                             continue;
                         }
 
-                        if event.mime == MIME_FILE_CHUNK_JSON_B64 {
-                            if let Ok(Some(completed)) = handle_file_chunk_event(
+                        if event.mime == MIME_FILE_CHUNK_JSON_B64
+                            && let Ok(Some(completed)) = handle_file_chunk_event(
                                 &config,
                                 &ui_event_tx,
                                 event.sender_device_id,
                                 &event.text_utf8,
-                            ) {
-                                info!(
-                                    sender_device_id = %completed.sender_device_id,
-                                    file_name = %completed.file_name,
-                                    size_bytes = completed.size_bytes,
-                                    "received complete encrypted file"
-                                );
-                                let _ = ui_event_tx.send(UiEvent::LastReceived(now_unix_ms()));
-                                let _ = ui_event_tx.send(UiEvent::IncomingFile {
-                                    sender_device_id: completed.sender_device_id,
-                                    file_name: completed.file_name,
-                                    temp_path: completed.temp_path,
-                                    size_bytes: completed.size_bytes,
-                                });
-                            }
+                            )
+                        {
+                            info!(
+                                sender_device_id = %completed.sender_device_id,
+                                file_name = %completed.file_name,
+                                size_bytes = completed.size_bytes,
+                                "received complete encrypted file"
+                            );
+                            let _ = ui_event_tx.send(UiEvent::LastReceived(now_unix_ms()));
+                            let _ = ui_event_tx.send(UiEvent::IncomingFile {
+                                sender_device_id: completed.sender_device_id,
+                                file_name: completed.file_name,
+                                temp_path: completed.temp_path,
+                                size_bytes: completed.size_bytes,
+                            });
                         }
                     }
                 }
@@ -3185,14 +3197,14 @@ mod windows_client {
     }
 
     async fn send_file_v1(
-        path: &PathBuf,
+        path: &Path,
         config: &ClientConfig,
         shared_state: &SharedRuntimeState,
         network_send_tx: &mpsc::UnboundedSender<WireMessage>,
         counter: &mut u64,
         ui_event_tx: &std::sync::mpsc::Sender<UiEvent>,
     ) -> Result<(), String> {
-        let path = path.clone();
+        let path = path.to_path_buf();
 
         let max_bytes = max_file_bytes();
         let (file_name, data) = tokio::task::spawn_blocking(move || {
@@ -3230,7 +3242,7 @@ mod windows_client {
 
         let total_size =
             u64::try_from(data.len()).map_err(|_| "file too large for u64".to_string())?;
-        let total_chunks = ((data.len() + FILE_CHUNK_RAW_BYTES - 1) / FILE_CHUNK_RAW_BYTES) as u32;
+        let total_chunks = data.len().div_ceil(FILE_CHUNK_RAW_BYTES) as u32;
         if total_chunks == 0 {
             return Err("file produced no chunks".to_string());
         }
@@ -3370,10 +3382,8 @@ mod windows_client {
 
         // Complete
         let mut out: Vec<u8> = Vec::with_capacity(entry.total_size as usize);
-        for c in entry.received.iter() {
-            if let Some(bytes) = c {
-                out.extend_from_slice(bytes);
-            }
+        for bytes in entry.received.iter().flatten() {
+            out.extend_from_slice(bytes);
         }
 
         if out.len() as u64 != entry.total_size {
@@ -3435,9 +3445,8 @@ mod windows_client {
                 || ch == '<'
                 || ch == '>'
                 || ch == '|'
+                || ch.is_control()
             {
-                out.push('_');
-            } else if ch.is_control() {
                 out.push('_');
             } else {
                 out.push(ch);
@@ -3643,11 +3652,8 @@ mod windows_client {
                 // Safety: calling Win32 API with valid pointers to stack variables.
                 let ok = unsafe {
                     FileTimeToSystemTime(&ft_utc, &mut st_utc) != 0
-                        && SystemTimeToTzSpecificLocalTime(
-                            std::ptr::null(),
-                            &st_utc,
-                            &mut st_local,
-                        ) != 0
+                        && SystemTimeToTzSpecificLocalTime(std::ptr::null(), &st_utc, &mut st_local)
+                            != 0
                 };
 
                 if ok {
