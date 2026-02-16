@@ -178,12 +178,11 @@ async fn unexpected_control_after_hello_is_ignored() {
     drain_non_encrypted(&mut client_a).await;
     drain_non_encrypted(&mut client_b).await;
 
-    let unexpected_control = WireMessage::Control(ControlMessage::PeerList(
-        cliprelay_core::PeerList {
+    let unexpected_control =
+        WireMessage::Control(ControlMessage::PeerList(cliprelay_core::PeerList {
             room_id: "room-control".to_owned(),
             peers: Vec::new(),
-        },
-    ));
+        }));
     let control_frame = encode_frame(&unexpected_control).expect("encode unexpected control");
     client_a
         .write
@@ -226,7 +225,8 @@ async fn room_capacity_rejects_eleventh_device() {
         drain_non_encrypted(client).await;
     }
 
-    let mut overflow_client = connect_client(&address, "room-cap", "dev-overflow", "Overflow").await;
+    let mut overflow_client =
+        connect_client(&address, "room-cap", "dev-overflow", "Overflow").await;
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let sender_payload = EncryptedPayload {
@@ -234,7 +234,8 @@ async fn room_capacity_rejects_eleventh_device() {
         counter: 42,
         ciphertext: vec![1, 2, 3, 4],
     };
-    let frame = encode_frame(&WireMessage::Encrypted(sender_payload.clone())).expect("encode payload");
+    let frame =
+        encode_frame(&WireMessage::Encrypted(sender_payload.clone())).expect("encode payload");
     room_clients[0]
         .write
         .send(Message::Binary(frame.into()))
@@ -246,7 +247,8 @@ async fn room_capacity_rejects_eleventh_device() {
         assert_eq!(received, Some(sender_payload.clone()));
     }
 
-    let overflow_received = recv_encrypted_payload(&mut overflow_client, Duration::from_millis(500)).await;
+    let overflow_received =
+        recv_encrypted_payload(&mut overflow_client, Duration::from_millis(500)).await;
     assert!(
         overflow_received.is_none(),
         "overflow client unexpectedly received encrypted payload"
@@ -262,9 +264,10 @@ async fn start_relay() -> (String, oneshot::Sender<()>) {
     let address = listener.local_addr().expect("relay local addr");
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
-    let server = axum::serve(listener, build_router(AppState::new())).with_graceful_shutdown(async {
-        let _ = shutdown_rx.await;
-    });
+    let server =
+        axum::serve(listener, build_router(AppState::new())).with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        });
     tokio::spawn(async move {
         let _ = server.await;
     });

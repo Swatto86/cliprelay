@@ -29,20 +29,16 @@ mod windows_client {
     use base64::Engine;
     use clap::Parser;
     use cliprelay_core::{
-        ClipboardEventPlaintext, ControlMessage, DeviceId, EncryptedPayload, Hello, MAX_CLIPBOARD_TEXT_BYTES,
-        MIME_FILE_CHUNK_JSON_B64, MIME_TEXT_PLAIN, PeerInfo, WireMessage, decode_frame,
-        decrypt_clipboard_event, derive_room_key, encrypt_clipboard_event, encode_frame,
-        room_id_from_code, validate_counter,
+        ClipboardEventPlaintext, ControlMessage, DeviceId, EncryptedPayload, Hello,
+        MAX_CLIPBOARD_TEXT_BYTES, MIME_FILE_CHUNK_JSON_B64, MIME_TEXT_PLAIN, PeerInfo, WireMessage,
+        decode_frame, decrypt_clipboard_event, derive_room_key, encode_frame,
+        encrypt_clipboard_event, room_id_from_code, validate_counter,
     };
     use futures::{SinkExt, StreamExt};
     use native_windows_gui as nwg;
     use serde::{Deserialize, Serialize};
     use sha2::{Digest, Sha256};
-    use tokio::{
-        runtime::Runtime,
-        sync::mpsc,
-        time::timeout,
-    };
+    use tokio::{runtime::Runtime, sync::mpsc, time::timeout};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
     use tracing::{error, info, warn};
     use tracing_subscriber::fmt::MakeWriter;
@@ -88,7 +84,9 @@ mod windows_client {
     }
 
     fn windows_autostart_is_enabled() -> bool {
-        let Ok(exe) = std::env::current_exe() else { return false };
+        let Ok(exe) = std::env::current_exe() else {
+            return false;
+        };
         autostart::is_enabled(&exe, "ClipRelay").unwrap_or(false)
     }
 
@@ -262,7 +260,8 @@ mod windows_client {
 
     impl ClipRelayTrayApp {
         fn build(config: ClientConfig) -> Result<Rc<RefCell<Self>>, String> {
-            let runtime = Runtime::new().map_err(|err| format!("tokio runtime init failed: {err}"))?;
+            let runtime =
+                Runtime::new().map_err(|err| format!("tokio runtime init failed: {err}"))?;
             let (ui_event_tx, ui_event_rx) = std::sync::mpsc::channel();
             let (runtime_cmd_tx, runtime_cmd_rx) = mpsc::unbounded_channel();
 
@@ -283,9 +282,12 @@ mod windows_client {
             let mut app_window = nwg::MessageWindow::default();
             let mut tray = nwg::TrayNotification::default();
             let icon_app = nwg::Icon::from_bin(APP_ICON_BYTES).map_err(|err| err.to_string())?;
-            let icon_red = nwg::Icon::from_bin(TRAY_ICON_RED_BYTES).map_err(|err| err.to_string())?;
-            let icon_amber = nwg::Icon::from_bin(TRAY_ICON_AMBER_BYTES).map_err(|err| err.to_string())?;
-            let icon_green = nwg::Icon::from_bin(TRAY_ICON_GREEN_BYTES).map_err(|err| err.to_string())?;
+            let icon_red =
+                nwg::Icon::from_bin(TRAY_ICON_RED_BYTES).map_err(|err| err.to_string())?;
+            let icon_amber =
+                nwg::Icon::from_bin(TRAY_ICON_AMBER_BYTES).map_err(|err| err.to_string())?;
+            let icon_green =
+                nwg::Icon::from_bin(TRAY_ICON_GREEN_BYTES).map_err(|err| err.to_string())?;
 
             let mut tray_menu = nwg::Menu::default();
             let mut tray_options_item = nwg::MenuItem::default();
@@ -322,8 +324,7 @@ mod windows_client {
                 .balloon_icon(Some(&icon_amber))
                 .tip(Some("ClipRelay | connecting"))
                 .flags(
-                    nwg::TrayNotificationFlags::USER_ICON
-                        | nwg::TrayNotificationFlags::LARGE_ICON,
+                    nwg::TrayNotificationFlags::USER_ICON | nwg::TrayNotificationFlags::LARGE_ICON,
                 )
                 .build(&mut tray)
                 .map_err(|err| err.to_string())?;
@@ -558,13 +559,16 @@ mod windows_client {
             let mut event_handlers = Vec::with_capacity(window_handles.len());
             for window_handle in window_handles {
                 let weak = weak.clone();
-                let handler = nwg::full_bind_event_handler(&window_handle, move |event, _evt_data, handle| {
-                    if let Some(app) = weak.upgrade() {
-                        if let Ok(mut app_mut) = app.try_borrow_mut() {
-                            app_mut.handle_event(event, handle);
+                let handler = nwg::full_bind_event_handler(
+                    &window_handle,
+                    move |event, _evt_data, handle| {
+                        if let Some(app) = weak.upgrade() {
+                            if let Ok(mut app_mut) = app.try_borrow_mut() {
+                                app_mut.handle_event(event, handle);
+                            }
                         }
-                    }
-                });
+                    },
+                );
                 event_handlers.push(handler);
             }
 
@@ -574,13 +578,13 @@ mod windows_client {
                 app_mut
                     .options_auto_apply_checkbox
                     .set_check_state(nwg::CheckBoxState::Unchecked);
-                app_mut
-                    .options_autostart_checkbox
-                    .set_check_state(if app_mut.state.autostart_enabled {
+                app_mut.options_autostart_checkbox.set_check_state(
+                    if app_mut.state.autostart_enabled {
                         nwg::CheckBoxState::Checked
                     } else {
                         nwg::CheckBoxState::Unchecked
-                    });
+                    },
+                );
                 app_mut.refresh_ui_texts();
                 app_mut.refresh_status_indicator();
                 if !app_mut.config.background {
@@ -630,8 +634,8 @@ mod windows_client {
                     self.send_file_via_dialog();
                 }
                 nwg::Event::OnButtonClick if handle == self.options_auto_apply_checkbox.handle => {
-                    self.state.auto_apply =
-                        self.options_auto_apply_checkbox.check_state() == nwg::CheckBoxState::Checked;
+                    self.state.auto_apply = self.options_auto_apply_checkbox.check_state()
+                        == nwg::CheckBoxState::Checked;
                     let _ = self
                         .state
                         .runtime_cmd_tx
@@ -647,7 +651,8 @@ mod windows_client {
                     self.refresh_ui_texts();
                 }
                 nwg::Event::OnButtonClick if handle == self.options_autostart_checkbox.handle => {
-                    let want = self.options_autostart_checkbox.check_state() == nwg::CheckBoxState::Checked;
+                    let want = self.options_autostart_checkbox.check_state()
+                        == nwg::CheckBoxState::Checked;
                     match windows_set_autostart_enabled(want) {
                         Ok(()) => {
                             self.state.autostart_enabled = want;
@@ -662,14 +667,18 @@ mod windows_client {
                         }
                         Err(err) => {
                             warn!("autostart toggle failed: {}", err);
-                            self.show_tray_info("ClipRelay", "Failed to update Windows startup setting");
+                            self.show_tray_info(
+                                "ClipRelay",
+                                "Failed to update Windows startup setting",
+                            );
                             // revert checkbox
-                            self.options_autostart_checkbox
-                                .set_check_state(if self.state.autostart_enabled {
+                            self.options_autostart_checkbox.set_check_state(
+                                if self.state.autostart_enabled {
                                     nwg::CheckBoxState::Checked
                                 } else {
                                     nwg::CheckBoxState::Unchecked
-                                });
+                                },
+                            );
                         }
                     }
                     self.refresh_ui_texts();
@@ -745,7 +754,10 @@ mod windows_client {
                             content_hash,
                         });
 
-                        self.show_tray_info("Clipboard received", &format!("From {}", sender_device_id));
+                        self.show_tray_info(
+                            "Clipboard received",
+                            &format!("From {}", sender_device_id),
+                        );
                         self.show_popup_if_needed();
                     }
                     UiEvent::IncomingFile {
@@ -850,7 +862,8 @@ mod windows_client {
                 && input_ok;
             self.send_button.set_enabled(can_send);
 
-            let can_send_files = self.state.connection_status == "Connected" && self.state.room_key_ready;
+            let can_send_files =
+                self.state.connection_status == "Connected" && self.state.room_key_ready;
             self.send_file_button.set_enabled(can_send_files);
 
             self.options_auto_apply_checkbox
@@ -876,7 +889,11 @@ mod windows_client {
                 self.config.device_id,
                 self.state.connection_status,
                 self.state.peers.len(),
-                if self.state.room_key_ready { "yes" } else { "no" },
+                if self.state.room_key_ready {
+                    "yes"
+                } else {
+                    "no"
+                },
                 self.state
                     .last_sent_time
                     .map(|x| x.to_string())
@@ -906,7 +923,8 @@ mod windows_client {
 
         fn show_tray_info(&self, title: &str, text: &str) {
             let icon = self.icon_for_status(self.tray_status);
-            let flags = nwg::TrayNotificationFlags::USER_ICON | nwg::TrayNotificationFlags::LARGE_ICON;
+            let flags =
+                nwg::TrayNotificationFlags::USER_ICON | nwg::TrayNotificationFlags::LARGE_ICON;
             self.tray.show(text, Some(title), Some(flags), Some(icon));
         }
 
@@ -1206,7 +1224,10 @@ mod windows_client {
         nwg::dispatch_thread_events();
     }
 
-    fn resolve_config(args: &ClientArgs, interactive: bool) -> Result<Option<SavedClientConfig>, String> {
+    fn resolve_config(
+        args: &ClientArgs,
+        interactive: bool,
+    ) -> Result<Option<SavedClientConfig>, String> {
         if let Some(room_code) = args.room_code.as_deref() {
             let cfg = SavedClientConfig {
                 server_url: args.server_url.clone(),
@@ -1328,13 +1349,11 @@ mod windows_client {
             return Ok(None);
         }
 
-        let data = std::fs::read_to_string(&path).map_err(|err| {
-            format!("failed to read config file {}: {err}", path.display())
-        })?;
+        let data = std::fs::read_to_string(&path)
+            .map_err(|err| format!("failed to read config file {}: {err}", path.display()))?;
 
-        let cfg: SavedClientConfig = serde_json::from_str(&data).map_err(|err| {
-            format!("failed to parse config file {}: {err}", path.display())
-        })?;
+        let cfg: SavedClientConfig = serde_json::from_str(&data)
+            .map_err(|err| format!("failed to parse config file {}: {err}", path.display()))?;
 
         validate_saved_config(&cfg)?;
         Ok(Some(cfg))
@@ -1358,8 +1377,9 @@ mod windows_client {
                 if path.exists() {
                     let _ = std::fs::remove_file(&path);
                 }
-                std::fs::rename(&tmp_path, &path)
-                    .map_err(|err| format!("failed to move config into place {}: {err}", path.display()))?;
+                std::fs::rename(&tmp_path, &path).map_err(|err| {
+                    format!("failed to move config into place {}: {err}", path.display())
+                })?;
                 Ok(())
             })();
 
@@ -1378,7 +1398,9 @@ mod windows_client {
         Err("unreachable: save_saved_config retry loop".to_string())
     }
 
-    fn prompt_for_config_gui(defaults: &SavedClientConfig) -> Result<Option<SavedClientConfig>, String> {
+    fn prompt_for_config_gui(
+        defaults: &SavedClientConfig,
+    ) -> Result<Option<SavedClientConfig>, String> {
         #[derive(Default)]
         struct SetupUi {
             window: nwg::Window,
@@ -1497,52 +1519,55 @@ mod windows_client {
         let ui_for_handler = Rc::clone(&ui);
 
         let window_handle = ui.window.handle;
-        let handler = nwg::full_bind_event_handler(&window_handle, move |event, _evt_data, handle| {
-            let mut completed = false;
-            if event == nwg::Event::OnWindowClose {
-                completed = true;
-                if let Ok(mut locked) = result_arc.lock() {
-                    *locked = Some(None);
-                }
-            }
-
-            if event == nwg::Event::OnButtonClick {
-                let ui_ref: &SetupUi = &ui_for_handler;
-                if handle == ui_ref.button_cancel.handle {
+        let handler =
+            nwg::full_bind_event_handler(&window_handle, move |event, _evt_data, handle| {
+                let mut completed = false;
+                if event == nwg::Event::OnWindowClose {
                     completed = true;
                     if let Ok(mut locked) = result_arc.lock() {
                         *locked = Some(None);
                     }
                 }
 
-                if handle == ui_ref.button_start.handle {
-                    let cfg = SavedClientConfig {
-                        room_code: ui_ref.input_room.text(),
-                        server_url: ui_ref.input_server.text(),
-                        device_name: ui_ref.input_device.text(),
-                    };
-                    if let Err(err) = validate_saved_config(&cfg) {
-                        nwg::simple_message("ClipRelay Setup", &err);
-                        return;
+                if event == nwg::Event::OnButtonClick {
+                    let ui_ref: &SetupUi = &ui_for_handler;
+                    if handle == ui_ref.button_cancel.handle {
+                        completed = true;
+                        if let Ok(mut locked) = result_arc.lock() {
+                            *locked = Some(None);
+                        }
                     }
 
-                    let _ = save_saved_config(&cfg);
-                    completed = true;
-                    if let Ok(mut locked) = result_arc.lock() {
-                        *locked = Some(Some(cfg));
+                    if handle == ui_ref.button_start.handle {
+                        let cfg = SavedClientConfig {
+                            room_code: ui_ref.input_room.text(),
+                            server_url: ui_ref.input_server.text(),
+                            device_name: ui_ref.input_device.text(),
+                        };
+                        if let Err(err) = validate_saved_config(&cfg) {
+                            nwg::simple_message("ClipRelay Setup", &err);
+                            return;
+                        }
+
+                        let _ = save_saved_config(&cfg);
+                        completed = true;
+                        if let Ok(mut locked) = result_arc.lock() {
+                            *locked = Some(Some(cfg));
+                        }
                     }
                 }
-            }
 
-            if completed {
-                nwg::stop_thread_dispatch();
-            }
-        });
+                if completed {
+                    nwg::stop_thread_dispatch();
+                }
+            });
 
         nwg::dispatch_thread_events();
         nwg::unbind_event_handler(&handler);
 
-        let locked = result.lock().map_err(|_| "setup result lock poisoned".to_string())?;
+        let locked = result
+            .lock()
+            .map_err(|_| "setup result lock poisoned".to_string())?;
         Ok(locked.clone().unwrap_or(None))
     }
 
@@ -1603,7 +1628,9 @@ mod windows_client {
             };
 
             save_saved_config(&cfg).expect("save config");
-            let loaded = load_saved_config().expect("load config").expect("config present");
+            let loaded = load_saved_config()
+                .expect("load config")
+                .expect("config present");
             assert_eq!(loaded.server_url, cfg.server_url);
             assert_eq!(loaded.room_code, cfg.room_code);
             assert_eq!(loaded.device_name, cfg.device_name);
@@ -1682,11 +1709,7 @@ mod windows_client {
         let env_filter = tracing_subscriber::EnvFilter::from_default_env();
 
         let log_path = client_log_path();
-        let file = match OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-        {
+        let file = match OpenOptions::new().create(true).append(true).open(&log_path) {
             Ok(file) => file,
             Err(err) => {
                 eprintln!("failed to open log file {}: {err}", log_path.display());
@@ -1740,7 +1763,10 @@ mod windows_client {
 
         if let Err(err) = Url::parse(&config.server_url) {
             error!(server_url = %config.server_url, "invalid server url: {err}");
-            let _ = ui_event_tx.send(UiEvent::RuntimeError(format!("invalid server URL: {}", err)));
+            let _ = ui_event_tx.send(UiEvent::RuntimeError(format!(
+                "invalid server URL: {}",
+                err
+            )));
             return;
         }
 
@@ -1909,7 +1935,8 @@ mod windows_client {
                     )
                     .await
                     {
-                        let _ = ui_event_tx.send(UiEvent::RuntimeError(format!("send file failed: {err}")));
+                        let _ = ui_event_tx
+                            .send(UiEvent::RuntimeError(format!("send file failed: {err}")));
                     }
                 }
             }
@@ -1935,7 +1962,9 @@ mod windows_client {
 
     async fn network_send_task(
         mut ws_write: futures::stream::SplitSink<
-            tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+            tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+            >,
             Message,
         >,
         mut outgoing_rx: mpsc::UnboundedReceiver<WireMessage>,
@@ -1954,7 +1983,9 @@ mod windows_client {
 
     async fn network_receive_task(
         mut ws_read: futures::stream::SplitStream<
-            tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+            tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+            >,
         >,
         config: ClientConfig,
         ui_event_tx: std::sync::mpsc::Sender<UiEvent>,
@@ -1967,7 +1998,8 @@ mod windows_client {
             let message = match next {
                 Ok(msg) => msg,
                 Err(err) => {
-                    let _ = ui_event_tx.send(UiEvent::RuntimeError(format!("read failed: {}", err)));
+                    let _ =
+                        ui_event_tx.send(UiEvent::RuntimeError(format!("read failed: {}", err)));
                     break;
                 }
             };
@@ -2127,11 +2159,14 @@ mod windows_client {
         let room_key = room_key.ok_or_else(|| "room key not ready".to_string())?;
 
         let transfer_id = {
-            let digest = Sha256::digest(format!("{}:{}:{}", config.device_id, now_unix_ms(), file_name).as_bytes());
+            let digest = Sha256::digest(
+                format!("{}:{}:{}", config.device_id, now_unix_ms(), file_name).as_bytes(),
+            );
             hex::encode(&digest[..16])
         };
 
-        let total_size = u64::try_from(data.len()).map_err(|_| "file too large for u64".to_string())?;
+        let total_size =
+            u64::try_from(data.len()).map_err(|_| "file too large for u64".to_string())?;
         let total_chunks = ((data.len() + FILE_CHUNK_RAW_BYTES - 1) / FILE_CHUNK_RAW_BYTES) as u32;
         if total_chunks == 0 {
             return Err("file produced no chunks".to_string());
@@ -2173,7 +2208,8 @@ mod windows_client {
                 text_utf8,
             };
 
-            let payload = encrypt_clipboard_event(&room_key, &plaintext).map_err(|e| e.to_string())?;
+            let payload =
+                encrypt_clipboard_event(&room_key, &plaintext).map_err(|e| e.to_string())?;
             network_send_clipboard(network_send_tx, payload).await;
         }
 
@@ -2222,7 +2258,9 @@ mod windows_client {
 
         let now = now_unix_ms();
         let key = format!("{}:{}", sender_device_id, env.transfer_id);
-        let mut guard = transfers.lock().map_err(|_| "transfer map poisoned".to_string())?;
+        let mut guard = transfers
+            .lock()
+            .map_err(|_| "transfer map poisoned".to_string())?;
 
         // Best-effort cleanup of stale transfers.
         guard.retain(|_, t| now.saturating_sub(t.last_update_ms) <= TRANSFER_TIMEOUT_MS);
@@ -2311,7 +2349,16 @@ mod windows_client {
         }
         let mut out = String::with_capacity(trimmed.len());
         for ch in trimmed.chars() {
-            if ch == '\\' || ch == '/' || ch == ':' || ch == '*' || ch == '?' || ch == '"' || ch == '<' || ch == '>' || ch == '|' {
+            if ch == '\\'
+                || ch == '/'
+                || ch == ':'
+                || ch == '*'
+                || ch == '?'
+                || ch == '"'
+                || ch == '<'
+                || ch == '>'
+                || ch == '|'
+            {
                 out.push('_');
             } else if ch.is_control() {
                 out.push('_');
@@ -2332,7 +2379,10 @@ mod windows_client {
             .join("Downloads")
     }
 
-    fn save_temp_file_to_downloads(temp_path: &PathBuf, file_name: &str) -> Result<PathBuf, String> {
+    fn save_temp_file_to_downloads(
+        temp_path: &PathBuf,
+        file_name: &str,
+    ) -> Result<PathBuf, String> {
         let base = downloads_dir().join("ClipRelay");
         std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
         let safe = sanitize_file_name(file_name);
@@ -2340,7 +2390,10 @@ mod windows_client {
         let mut dest = base.join(&safe);
         if dest.exists() {
             let safe_path = std::path::Path::new(&safe);
-            let stem = safe_path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+            let stem = safe_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("file");
             let ext = safe_path.extension().and_then(|s| s.to_str());
             for i in 1..=200 {
                 let candidate = if let Some(ext) = ext {

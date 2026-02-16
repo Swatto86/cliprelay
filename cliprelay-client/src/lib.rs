@@ -1,10 +1,6 @@
 #[cfg(target_os = "windows")]
 pub mod autostart {
-    use std::{
-        fmt,
-        path::Path,
-        string::FromUtf16Error,
-    };
+    use std::{fmt, path::Path, string::FromUtf16Error};
 
     use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
     use windows_sys::Win32::System::Registry::{
@@ -62,10 +58,7 @@ pub mod autostart {
 
     pub fn is_enabled(exe: &Path, value_name: &str) -> Result<bool, AutostartError> {
         let expected = autostart_command(exe);
-        Ok(
-            run_key_get_value_string(value_name)?
-                .is_some_and(|v| v.trim() == expected.trim()),
-        )
+        Ok(run_key_get_value_string(value_name)?.is_some_and(|v| v.trim() == expected.trim()))
     }
 
     pub fn set_enabled(exe: &Path, value_name: &str, enabled: bool) -> Result<(), AutostartError> {
@@ -81,7 +74,15 @@ pub mod autostart {
     fn run_key_open(desired_access: u32) -> Result<HKEY, AutostartError> {
         let subkey = wide_null(RUN_SUBKEY);
         let mut out: HKEY = 0;
-        let status = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, desired_access, &mut out) };
+        let status = unsafe {
+            RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                subkey.as_ptr(),
+                0,
+                desired_access,
+                &mut out,
+            )
+        };
         if status != 0 {
             return Err(AutostartError::RegOpenRunKey { status });
         }
@@ -162,9 +163,8 @@ pub mod autostart {
         let key = run_key_open(KEY_WRITE | KEY_SET_VALUE)?;
         let name_w = wide_null(name);
         let value_w = wide_null(value);
-        let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(value_w.as_ptr() as *const u8, value_w.len() * 2)
-        };
+        let bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(value_w.as_ptr() as *const u8, value_w.len() * 2) };
 
         let status = unsafe {
             RegSetValueExW(
@@ -246,7 +246,11 @@ pub mod autostart {
         Ok(false)
     }
 
-    pub fn set_enabled(_exe: &Path, _value_name: &str, _enabled: bool) -> Result<(), AutostartError> {
+    pub fn set_enabled(
+        _exe: &Path,
+        _value_name: &str,
+        _enabled: bool,
+    ) -> Result<(), AutostartError> {
         Ok(())
     }
 }

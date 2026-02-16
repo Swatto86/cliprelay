@@ -11,7 +11,10 @@ use cliprelay_core::{
     PeerJoined, PeerLeft, PeerList, RoomId, SaltExchange, WireMessage, decode_frame, encode_frame,
 };
 use futures::{SinkExt, StreamExt};
-use tokio::{net::TcpListener, sync::{RwLock, mpsc}};
+use tokio::{
+    net::TcpListener,
+    sync::{RwLock, mpsc},
+};
 use tracing::{error, info, warn};
 
 #[derive(Debug, Clone)]
@@ -92,7 +95,13 @@ pub fn build_router(state: AppState) -> Router {
 }
 
 pub async fn serve(listener: TcpListener, state: AppState) -> Result<(), String> {
-    info!("relay listening on {}", listener.local_addr().map(|a| a.to_string()).unwrap_or_else(|_| "unknown".to_owned()));
+    info!(
+        "relay listening on {}",
+        listener
+            .local_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|_| "unknown".to_owned())
+    );
     axum::serve(listener, build_router(state))
         .await
         .map_err(|err| err.to_string())
@@ -103,11 +112,12 @@ async fn healthz_handler() -> impl IntoResponse {
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    ws.max_frame_size(MAX_RELAY_MESSAGE_BYTES).on_upgrade(move |socket| async move {
-        if let Err(err) = handle_socket(state, socket).await {
-            warn!("socket session ended with error: {}", err);
-        }
-    })
+    ws.max_frame_size(MAX_RELAY_MESSAGE_BYTES)
+        .on_upgrade(move |socket| async move {
+            if let Err(err) = handle_socket(state, socket).await {
+                warn!("socket session ended with error: {}", err);
+            }
+        })
 }
 
 async fn handle_socket(
@@ -240,7 +250,10 @@ async fn register_client(
     let mut relay = state.inner.write().await;
     let room = relay.rooms.entry(room_id.clone()).or_default();
     if room.devices.len() >= MAX_DEVICES_PER_ROOM {
-        return Err(format!("room {} is full (max {})", room_id, MAX_DEVICES_PER_ROOM));
+        return Err(format!(
+            "room {} is full (max {})",
+            room_id, MAX_DEVICES_PER_ROOM
+        ));
     }
     room.devices
         .insert(connection.peer.device_id.clone(), connection.clone());
@@ -290,7 +303,11 @@ async fn unregister_client(state: &AppState, room_id: &RoomId, device_id: &Devic
     if let Some(room) = relay.rooms.get_mut(room_id) {
         room.devices.remove(device_id);
         recipients = room.devices.values().map(|conn| conn.tx.clone()).collect();
-        peers = room.devices.values().map(|conn| conn.peer.clone()).collect();
+        peers = room
+            .devices
+            .values()
+            .map(|conn| conn.peer.clone())
+            .collect();
         if room.devices.is_empty() {
             relay.rooms.remove(room_id);
         }

@@ -1,6 +1,6 @@
 use clap::Parser;
-use tracing::{error, info, warn};
 use cliprelay_relay::{AppState, serve};
+use tracing::{error, info, warn};
 
 #[derive(Parser, Debug)]
 #[command(name = "cliprelay-relay")]

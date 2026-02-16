@@ -188,8 +188,8 @@ pub fn decrypt_clipboard_event(
         )
         .map_err(|_| CoreError::DecryptionFailed)?;
 
-    let event: ClipboardEventPlaintext =
-        serde_json::from_slice(&plaintext).map_err(|err| CoreError::Serialization(err.to_string()))?;
+    let event: ClipboardEventPlaintext = serde_json::from_slice(&plaintext)
+        .map_err(|err| CoreError::Serialization(err.to_string()))?;
     if event.sender_device_id != payload.sender_device_id || event.counter != payload.counter {
         return Err(CoreError::PayloadIdentityMismatch);
     }
@@ -283,8 +283,10 @@ fn encode_encrypted_payload(payload: &EncryptedPayload) -> Result<Vec<u8>, CoreE
     // - ciphertext_len: u32
     // - ciphertext bytes
     let device_id = payload.sender_device_id.as_bytes();
-    let device_id_len = u16::try_from(device_id.len()).map_err(|_| CoreError::InvalidFrameLength)?;
-    let ciphertext_len = u32::try_from(payload.ciphertext.len()).map_err(|_| CoreError::InvalidFrameLength)?;
+    let device_id_len =
+        u16::try_from(device_id.len()).map_err(|_| CoreError::InvalidFrameLength)?;
+    let ciphertext_len =
+        u32::try_from(payload.ciphertext.len()).map_err(|_| CoreError::InvalidFrameLength)?;
 
     let mut out = BytesMut::with_capacity(2 + device_id.len() + 8 + 4 + payload.ciphertext.len());
     out.put_u16_le(device_id_len);
