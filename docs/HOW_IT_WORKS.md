@@ -129,6 +129,11 @@ Saved config path:
 
 - `%LOCALAPPDATA%\ClipRelay\config.json`
 
+Background mode:
+
+- `--background` starts the app in the tray using the saved config.
+- If no saved config exists, `--background` exits without showing setup prompts.
+
 ### 6.2 Tray status colors
 
 - **Red**: disconnected / cannot reach relay
@@ -137,14 +142,30 @@ Saved config path:
 
 ### 6.3 User actions
 
-- Left-click tray icon: open/close Send window
+- Double-click tray icon: open/close Send window
 - Right-click tray icon: Options / Quit
 
 Options:
 
 - Auto apply (when enabled, incoming text is applied automatically)
+- Start with Windows (adds/removes a per-user startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that launches `"cliprelay-client.exe" --background`; implemented via WinAPI registry calls)
 
-## 7) Relay Behavior (What It Does and Doesn’t Do)
+## 7) Sending Mode (Manual Only)
+
+This client is **manual-send only**:
+
+- It does **not** automatically transmit everything you copy.
+- To send, open the Send window (double-click the tray icon), paste/type into the textbox, and click **Send**.
+- Receiving still shows tray + popup notifications.
+
+### 7.1 Files (MVP)
+
+- The Send window also has **Send file…** to transmit an arbitrary file.
+- Files are **chunked** and sent end-to-end encrypted through the relay.
+- Max file size is **5 MiB** (hard cap).
+- On the receiving machine, the popup shows a preview; click **Save** to write the file under `Downloads\ClipRelay`.
+
+## 8) Relay Behavior (What It Does and Doesn’t Do)
 
 The relay:
 
@@ -158,7 +179,7 @@ The relay does NOT:
 - Provide store-and-forward (offline clients will miss messages)
 - Decrypt clipboard contents
 
-## 8) Cloud Deployment on relay.swatto.co.uk
+## 9) Cloud Deployment on relay.swatto.co.uk
 
 ### 8.1 Process layout
 
@@ -197,7 +218,7 @@ Repo deployment helpers:
 - Private/local:
   - TCP 8080 (relay loopback)
 
-## 9) Operational Troubleshooting
+## 10) Operational Troubleshooting
 
 ### 9.1 “Client shows nothing / exits”
 
@@ -223,7 +244,7 @@ Both are useful:
 - If public is down: Caddy/DNS/firewall problem.
 - If local is down: relay process/service problem.
 
-## 10) Diagrams
+## 11) Diagrams
 
 ### 10.1 High-level component diagram
 

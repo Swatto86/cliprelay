@@ -13,6 +13,9 @@ use thiserror::Error;
 pub const MAX_CLIPBOARD_TEXT_BYTES: usize = 256 * 1024;
 pub const MAX_RELAY_MESSAGE_BYTES: usize = 300 * 1024;
 pub const MAX_DEVICES_PER_ROOM: usize = 10;
+pub const MAX_MIME_LEN: usize = 128;
+pub const MIME_TEXT_PLAIN: &str = "text/plain";
+pub const MIME_FILE_CHUNK_JSON_B64: &str = "application/x-cliprelay-file-chunk+json;base64";
 const ROOM_KEY_INFO: &[u8] = b"cliprelay v1 room key";
 
 pub type DeviceId = String;
@@ -98,9 +101,9 @@ pub enum MessageType {
 pub enum CoreError {
     #[error("room code must not be empty")]
     EmptyRoomCode,
-    #[error("clipboard event MIME must be text/plain")]
+    #[error("clipboard event MIME must be non-empty and <= 128 chars")]
     InvalidMime,
-    #[error("clipboard text exceeds 256 KiB")]
+    #[error("clipboard event payload exceeds 256 KiB")]
     ClipboardTooLarge,
     #[error("invalid frame length")]
     InvalidFrameLength,
@@ -140,7 +143,8 @@ pub fn encrypt_clipboard_event(
     room_key: &[u8; 32],
     event: &ClipboardEventPlaintext,
 ) -> Result<EncryptedPayload, CoreError> {
-    if event.mime != "text/plain" {
+    let mime = event.mime.trim();
+    if mime.is_empty() || mime.len() > MAX_MIME_LEN {
         return Err(CoreError::InvalidMime);
     }
     if event.text_utf8.len() > MAX_CLIPBOARD_TEXT_BYTES {
@@ -189,7 +193,8 @@ pub fn decrypt_clipboard_event(
     if event.sender_device_id != payload.sender_device_id || event.counter != payload.counter {
         return Err(CoreError::PayloadIdentityMismatch);
     }
-    if event.mime != "text/plain" {
+    let mime = event.mime.trim();
+    if mime.is_empty() || mime.len() > MAX_MIME_LEN {
         return Err(CoreError::InvalidMime);
     }
     if event.text_utf8.len() > MAX_CLIPBOARD_TEXT_BYTES {
@@ -225,8 +230,7 @@ pub fn encode_frame(message: &WireMessage) -> Result<Vec<u8>, CoreError> {
         ),
         WireMessage::Encrypted(encrypted) => (
             MessageType::EncryptedClipboard as u8,
-            serde_json::to_vec(encrypted)
-                .map_err(|err| CoreError::Serialization(err.to_string()))?,
+            encode_encrypted_payload(encrypted)?,
         ),
     };
 
@@ -263,12 +267,61 @@ pub fn decode_frame(frame: &[u8]) -> Result<WireMessage, CoreError> {
             Ok(WireMessage::Control(control))
         }
         x if x == MessageType::EncryptedClipboard as u8 => {
-            let encrypted: EncryptedPayload = serde_json::from_slice(payload)
-                .map_err(|err| CoreError::Serialization(err.to_string()))?;
+            let encrypted = decode_encrypted_payload(payload)?;
             Ok(WireMessage::Encrypted(encrypted))
         }
         other => Err(CoreError::UnsupportedMessageType(other)),
     }
+}
+
+fn encode_encrypted_payload(payload: &EncryptedPayload) -> Result<Vec<u8>, CoreError> {
+    // Compact binary encoding to keep frames small.
+    // Layout:
+    // - device_id_len: u16
+    // - device_id bytes (utf-8)
+    // - counter: u64
+    // - ciphertext_len: u32
+    // - ciphertext bytes
+    let device_id = payload.sender_device_id.as_bytes();
+    let device_id_len = u16::try_from(device_id.len()).map_err(|_| CoreError::InvalidFrameLength)?;
+    let ciphertext_len = u32::try_from(payload.ciphertext.len()).map_err(|_| CoreError::InvalidFrameLength)?;
+
+    let mut out = BytesMut::with_capacity(2 + device_id.len() + 8 + 4 + payload.ciphertext.len());
+    out.put_u16_le(device_id_len);
+    out.extend_from_slice(device_id);
+    out.put_u64_le(payload.counter);
+    out.put_u32_le(ciphertext_len);
+    out.extend_from_slice(&payload.ciphertext);
+    Ok(out.to_vec())
+}
+
+fn decode_encrypted_payload(mut bytes: &[u8]) -> Result<EncryptedPayload, CoreError> {
+    if bytes.len() < 2 + 8 + 4 {
+        return Err(CoreError::InvalidFrameLength);
+    }
+
+    let device_id_len = bytes.get_u16_le() as usize;
+    if bytes.len() < device_id_len + 8 + 4 {
+        return Err(CoreError::InvalidFrameLength);
+    }
+
+    let device_id_bytes = &bytes[..device_id_len];
+    bytes = &bytes[device_id_len..];
+    let sender_device_id = std::str::from_utf8(device_id_bytes)
+        .map_err(|err| CoreError::Serialization(err.to_string()))?
+        .to_owned();
+
+    let counter = bytes.get_u64_le();
+    let ciphertext_len = bytes.get_u32_le() as usize;
+    if bytes.len() != ciphertext_len {
+        return Err(CoreError::InvalidFrameLength);
+    }
+
+    Ok(EncryptedPayload {
+        sender_device_id,
+        counter,
+        ciphertext: bytes.to_vec(),
+    })
 }
 
 pub fn room_id_from_code(room_code: &str) -> RoomId {

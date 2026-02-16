@@ -26,11 +26,13 @@ mod windows_client {
     };
 
     use arboard::Clipboard;
+    use base64::Engine;
     use clap::Parser;
     use cliprelay_core::{
         ClipboardEventPlaintext, ControlMessage, DeviceId, EncryptedPayload, Hello, MAX_CLIPBOARD_TEXT_BYTES,
-        PeerInfo, WireMessage, decode_frame, decrypt_clipboard_event, derive_room_key,
-        encrypt_clipboard_event, encode_frame, room_id_from_code, validate_counter,
+        MIME_FILE_CHUNK_JSON_B64, MIME_TEXT_PLAIN, PeerInfo, WireMessage, decode_frame,
+        decrypt_clipboard_event, derive_room_key, encrypt_clipboard_event, encode_frame,
+        room_id_from_code, validate_counter,
     };
     use futures::{SinkExt, StreamExt};
     use native_windows_gui as nwg;
@@ -39,12 +41,14 @@ mod windows_client {
     use tokio::{
         runtime::Runtime,
         sync::mpsc,
-        time::{MissedTickBehavior, interval, timeout},
+        time::timeout,
     };
     use tokio_tungstenite::{connect_async, tungstenite::Message};
     use tracing::{error, info, warn};
     use tracing_subscriber::fmt::MakeWriter;
     use url::Url;
+
+    use cliprelay_client::autostart;
 
     #[derive(Clone)]
     struct FileMakeWriter {
@@ -83,11 +87,20 @@ mod windows_client {
         }
     }
 
+    fn windows_autostart_is_enabled() -> bool {
+        let Ok(exe) = std::env::current_exe() else { return false };
+        autostart::is_enabled(&exe, "ClipRelay").unwrap_or(false)
+    }
+
+    fn windows_set_autostart_enabled(enabled: bool) -> Result<(), String> {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        autostart::set_enabled(&exe, "ClipRelay", enabled).map_err(|e| e.to_string())
+    }
+
     static TRAY_ICON_RED_BYTES: &[u8] = include_bytes!("../assets/tray-red.ico");
     static TRAY_ICON_AMBER_BYTES: &[u8] = include_bytes!("../assets/tray-amber.ico");
     static TRAY_ICON_GREEN_BYTES: &[u8] = include_bytes!("../assets/tray-green.ico");
     static APP_ICON_BYTES: &[u8] = include_bytes!("../assets/cliprelay.ico");
-
     #[derive(Parser, Debug, Clone)]
     #[command(name = "cliprelay-client")]
     struct ClientArgs {
@@ -97,6 +110,10 @@ mod windows_client {
         room_code: Option<String>,
         #[arg(long, default_value = "ClipRelay Device")]
         device_name: String,
+
+        /// When set, the app will not show setup prompts; it will load saved config if present and otherwise exit.
+        #[arg(long, default_value_t = false)]
+        background: bool,
     }
 
     #[derive(Debug, Clone)]
@@ -106,6 +123,7 @@ mod windows_client {
         room_id: String,
         device_id: String,
         device_name: String,
+        background: bool,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +137,13 @@ mod windows_client {
     const MAX_SERVER_URL_LEN: usize = 2048;
     const MAX_DEVICE_NAME_LEN: usize = 128;
 
+    const DEFAULT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
+    const MAX_INFLIGHT_TRANSFERS: usize = 8;
+    const TRANSFER_TIMEOUT_MS: u64 = 120_000;
+    const MAX_TOTAL_CHUNKS: u32 = 256;
+    const FILE_CHUNK_RAW_BYTES: usize = 64 * 1024;
+    const MAX_NOTIFICATIONS: usize = 20;
+
     #[derive(Debug)]
     enum UiEvent {
         ConnectionStatus(String),
@@ -131,6 +156,12 @@ mod windows_client {
             text: String,
             content_hash: [u8; 32],
         },
+        IncomingFile {
+            sender_device_id: String,
+            file_name: String,
+            temp_path: PathBuf,
+            size_bytes: u64,
+        },
         RuntimeError(String),
     }
 
@@ -139,14 +170,23 @@ mod windows_client {
         SetAutoApply(bool),
         MarkApplied([u8; 32]),
         SendText(String),
+        SendFile(PathBuf),
     }
 
     #[derive(Debug, Clone)]
-    struct Notification {
-        sender_device_id: String,
-        preview: String,
-        full_text: String,
-        content_hash: [u8; 32],
+    enum Notification {
+        Text {
+            sender_device_id: String,
+            preview: String,
+            full_text: String,
+            content_hash: [u8; 32],
+        },
+        File {
+            sender_device_id: String,
+            preview: String,
+            file_name: String,
+            temp_path: PathBuf,
+        },
     }
 
     #[derive(Debug, Clone)]
@@ -166,6 +206,7 @@ mod windows_client {
         notifications: Vec<Notification>,
         auto_apply: bool,
         room_key_ready: bool,
+        autostart_enabled: bool,
         last_sent_time: Option<u64>,
         last_received_time: Option<u64>,
         last_error: Option<String>,
@@ -194,10 +235,12 @@ mod windows_client {
         send_status_label: nwg::Label,
         send_text_box: nwg::TextBox,
         send_button: nwg::Button,
+        send_file_button: nwg::Button,
 
         options_window: nwg::Window,
         options_info_box: nwg::TextBox,
         options_auto_apply_checkbox: nwg::CheckBox,
+        options_autostart_checkbox: nwg::CheckBox,
         options_error_label: nwg::Label,
         options_close_button: nwg::Button,
 
@@ -213,6 +256,8 @@ mod windows_client {
         config: ClientConfig,
         state: ClientUiState,
         tray_status: TrayStatus,
+
+        last_tray_click_ms: Option<u64>,
     }
 
     impl ClipRelayTrayApp {
@@ -250,10 +295,12 @@ mod windows_client {
             let mut send_status_label = nwg::Label::default();
             let mut send_text_box = nwg::TextBox::default();
             let mut send_button = nwg::Button::default();
+            let mut send_file_button = nwg::Button::default();
 
             let mut options_window = nwg::Window::default();
             let mut options_info_box = nwg::TextBox::default();
             let mut options_auto_apply_checkbox = nwg::CheckBox::default();
+            let mut options_autostart_checkbox = nwg::CheckBox::default();
             let mut options_error_label = nwg::Label::default();
             let mut options_close_button = nwg::Button::default();
 
@@ -329,11 +376,19 @@ mod windows_client {
                 .map_err(|err| err.to_string())?;
 
             nwg::Button::builder()
-                .text("Send to connected devices")
+                .text("Send text")
                 .position((scale_px(16), send_height - scale_px(52)))
-                .size((scale_px(220), scale_px(34)))
+                .size((scale_px(140), scale_px(34)))
                 .parent(&send_window)
                 .build(&mut send_button)
+                .map_err(|err| err.to_string())?;
+
+            nwg::Button::builder()
+                .text("Send file…")
+                .position((scale_px(164), send_height - scale_px(52)))
+                .size((scale_px(140), scale_px(34)))
+                .parent(&send_window)
+                .build(&mut send_file_button)
                 .map_err(|err| err.to_string())?;
 
             let options_width = scale_px(440);
@@ -363,6 +418,14 @@ mod windows_client {
                 .size((options_width - scale_px(32), scale_px(24)))
                 .parent(&options_window)
                 .build(&mut options_auto_apply_checkbox)
+                .map_err(|err| err.to_string())?;
+
+            nwg::CheckBox::builder()
+                .text("Start with Windows")
+                .position((scale_px(16), scale_px(214)))
+                .size((options_width - scale_px(32), scale_px(26)))
+                .parent(&options_window)
+                .build(&mut options_autostart_checkbox)
                 .map_err(|err| err.to_string())?;
 
             nwg::Label::builder()
@@ -448,9 +511,11 @@ mod windows_client {
                 send_status_label,
                 send_text_box,
                 send_button,
+                send_file_button,
                 options_window,
                 options_info_box,
                 options_auto_apply_checkbox,
+                options_autostart_checkbox,
                 options_error_label,
                 options_close_button,
                 popup_window,
@@ -470,11 +535,13 @@ mod windows_client {
                     notifications: Vec::new(),
                     auto_apply: false,
                     room_key_ready: false,
+                    autostart_enabled: windows_autostart_is_enabled(),
                     last_sent_time: None,
                     last_received_time: None,
                     last_error: None,
                 },
                 tray_status: TrayStatus::Amber,
+                last_tray_click_ms: None,
             }));
 
             let weak: Weak<RefCell<Self>> = Rc::downgrade(&app);
@@ -507,9 +574,18 @@ mod windows_client {
                 app_mut
                     .options_auto_apply_checkbox
                     .set_check_state(nwg::CheckBoxState::Unchecked);
+                app_mut
+                    .options_autostart_checkbox
+                    .set_check_state(if app_mut.state.autostart_enabled {
+                        nwg::CheckBoxState::Checked
+                    } else {
+                        nwg::CheckBoxState::Unchecked
+                    });
                 app_mut.refresh_ui_texts();
                 app_mut.refresh_status_indicator();
-                app_mut.show_startup_notification();
+                if !app_mut.config.background {
+                    app_mut.show_startup_notification();
+                }
             }
 
             Ok(app)
@@ -523,7 +599,18 @@ mod windows_client {
                 nwg::Event::OnMousePress(nwg::MousePressEvent::MousePressLeftUp)
                     if handle == self.tray.handle =>
                 {
-                    self.toggle_send_window();
+                    // native-windows-gui does not reliably emit a dedicated tray double-click
+                    // event across all configurations, so implement a small timing-based detector.
+                    const DOUBLE_CLICK_THRESHOLD_MS: u64 = 450;
+                    let now = now_unix_ms();
+                    let is_double = self
+                        .last_tray_click_ms
+                        .is_some_and(|prev| now.saturating_sub(prev) <= DOUBLE_CLICK_THRESHOLD_MS);
+                    self.last_tray_click_ms = Some(now);
+
+                    if is_double {
+                        self.toggle_send_window();
+                    }
                 }
                 nwg::Event::OnContextMenu if handle == self.tray.handle => {
                     let (x, y) = nwg::GlobalCursor::position();
@@ -538,6 +625,9 @@ mod windows_client {
                 }
                 nwg::Event::OnButtonClick if handle == self.send_button.handle => {
                     self.send_manual_clipboard();
+                }
+                nwg::Event::OnButtonClick if handle == self.send_file_button.handle => {
+                    self.send_file_via_dialog();
                 }
                 nwg::Event::OnButtonClick if handle == self.options_auto_apply_checkbox.handle => {
                     self.state.auto_apply =
@@ -554,6 +644,34 @@ mod windows_client {
                             "Auto apply disabled"
                         },
                     );
+                    self.refresh_ui_texts();
+                }
+                nwg::Event::OnButtonClick if handle == self.options_autostart_checkbox.handle => {
+                    let want = self.options_autostart_checkbox.check_state() == nwg::CheckBoxState::Checked;
+                    match windows_set_autostart_enabled(want) {
+                        Ok(()) => {
+                            self.state.autostart_enabled = want;
+                            self.show_tray_info(
+                                "ClipRelay",
+                                if want {
+                                    "Start with Windows enabled"
+                                } else {
+                                    "Start with Windows disabled"
+                                },
+                            );
+                        }
+                        Err(err) => {
+                            warn!("autostart toggle failed: {}", err);
+                            self.show_tray_info("ClipRelay", "Failed to update Windows startup setting");
+                            // revert checkbox
+                            self.options_autostart_checkbox
+                                .set_check_state(if self.state.autostart_enabled {
+                                    nwg::CheckBoxState::Checked
+                                } else {
+                                    nwg::CheckBoxState::Unchecked
+                                });
+                        }
+                    }
                     self.refresh_ui_texts();
                 }
                 nwg::Event::OnButtonClick if handle == self.options_close_button.handle => {
@@ -620,7 +738,7 @@ mod windows_client {
                             continue;
                         }
 
-                        self.state.notifications.push(Notification {
+                        self.push_notification(Notification::Text {
                             sender_device_id: sender_device_id.clone(),
                             preview: preview_text(&text, 450),
                             full_text: text,
@@ -628,6 +746,26 @@ mod windows_client {
                         });
 
                         self.show_tray_info("Clipboard received", &format!("From {}", sender_device_id));
+                        self.show_popup_if_needed();
+                    }
+                    UiEvent::IncomingFile {
+                        sender_device_id,
+                        file_name,
+                        temp_path,
+                        size_bytes,
+                    } => {
+                        let preview = format!(
+                            "File: {}\r\nSize: {} bytes\r\n\r\nClick Save to store it in Downloads\\ClipRelay.",
+                            file_name, size_bytes
+                        );
+                        self.push_notification(Notification::File {
+                            sender_device_id: sender_device_id.clone(),
+                            preview,
+                            file_name,
+                            temp_path,
+                        });
+
+                        self.show_tray_info("File received", &format!("From {}", sender_device_id));
                         self.show_popup_if_needed();
                     }
                     UiEvent::RuntimeError(message) => {
@@ -712,8 +850,18 @@ mod windows_client {
                 && input_ok;
             self.send_button.set_enabled(can_send);
 
+            let can_send_files = self.state.connection_status == "Connected" && self.state.room_key_ready;
+            self.send_file_button.set_enabled(can_send_files);
+
             self.options_auto_apply_checkbox
                 .set_check_state(if self.state.auto_apply {
+                    nwg::CheckBoxState::Checked
+                } else {
+                    nwg::CheckBoxState::Unchecked
+                });
+
+            self.options_autostart_checkbox
+                .set_check_state(if self.state.autostart_enabled {
                     nwg::CheckBoxState::Checked
                 } else {
                     nwg::CheckBoxState::Unchecked
@@ -752,7 +900,7 @@ mod windows_client {
         fn show_startup_notification(&self) {
             self.show_tray_info(
                 "ClipRelay",
-                "Running in tray. Left-click tray icon to open send UI.",
+                "Running in tray. Double-click tray icon to open send UI.",
             );
         }
 
@@ -827,6 +975,68 @@ mod windows_client {
             self.show_tray_info("ClipRelay", "Sent to connected devices");
         }
 
+        fn send_file_via_dialog(&mut self) {
+            if self.state.connection_status != "Connected" {
+                self.show_tray_info("ClipRelay", "Not connected yet");
+                return;
+            }
+
+            if !self.state.room_key_ready {
+                self.show_tray_info("ClipRelay", "Waiting for room key derivation");
+                return;
+            }
+
+            let mut dialog = nwg::FileDialog::default();
+            if nwg::FileDialog::builder()
+                .title("Select file to send")
+                .action(nwg::FileDialogAction::Open)
+                .multiselect(false)
+                .build(&mut dialog)
+                .is_err()
+            {
+                self.show_tray_info("ClipRelay", "Failed to open file dialog");
+                return;
+            }
+
+            if !dialog.run(Some(&self.send_window)) {
+                return;
+            }
+
+            let os = match dialog.get_selected_item() {
+                Ok(os) => os,
+                Err(_) => {
+                    self.show_tray_info("ClipRelay", "Failed to read selected file path");
+                    return;
+                }
+            };
+            if os.is_empty() {
+                return;
+            }
+            let path = PathBuf::from(os);
+
+            if self
+                .state
+                .runtime_cmd_tx
+                .send(RuntimeCommand::SendFile(path.clone()))
+                .is_err()
+            {
+                self.show_tray_info("ClipRelay", "Send failed: runtime not available");
+                return;
+            }
+
+            self.show_tray_info(
+                "ClipRelay",
+                &format!("Queued file for send: {}", path.display()),
+            );
+        }
+
+        fn push_notification(&mut self, n: Notification) {
+            if self.state.notifications.len() >= MAX_NOTIFICATIONS {
+                self.state.notifications.remove(0);
+            }
+            self.state.notifications.push(n);
+        }
+
         fn show_popup_if_needed(&mut self) {
             if self.state.notifications.is_empty() {
                 self.popup_window.set_visible(false);
@@ -834,9 +1044,28 @@ mod windows_client {
             }
 
             if let Some(notification) = self.state.notifications.first() {
-                self.popup_sender_label
-                    .set_text(&format!("From: {}", notification.sender_device_id));
-                self.popup_text_box.set_text(&notification.preview);
+                match notification {
+                    Notification::Text {
+                        sender_device_id,
+                        preview,
+                        ..
+                    } => {
+                        self.popup_sender_label
+                            .set_text(&format!("From: {}", sender_device_id));
+                        self.popup_text_box.set_text(preview);
+                        self.popup_apply_button.set_text("Apply");
+                    }
+                    Notification::File {
+                        sender_device_id,
+                        preview,
+                        ..
+                    } => {
+                        self.popup_sender_label
+                            .set_text(&format!("From: {}", sender_device_id));
+                        self.popup_text_box.set_text(preview);
+                        self.popup_apply_button.set_text("Save");
+                    }
+                }
             }
 
             let margin = scale_px(24);
@@ -856,18 +1085,45 @@ mod windows_client {
             }
 
             let notification = self.state.notifications.remove(0);
-            if let Err(err) = apply_clipboard_text(&notification.full_text) {
-                warn!("manual apply failed: {}", err);
-                self.show_tray_info("ClipRelay", "Failed to apply clipboard text");
-            } else {
-                let _ = self
-                    .state
-                    .runtime_cmd_tx
-                    .send(RuntimeCommand::MarkApplied(notification.content_hash));
-                self.show_tray_info(
-                    "ClipRelay",
-                    &format!("Clipboard applied from {}", notification.sender_device_id),
-                );
+            match notification {
+                Notification::Text {
+                    sender_device_id,
+                    full_text,
+                    content_hash,
+                    ..
+                } => {
+                    if let Err(err) = apply_clipboard_text(&full_text) {
+                        warn!("manual apply failed: {}", err);
+                        self.show_tray_info("ClipRelay", "Failed to apply clipboard text");
+                    } else {
+                        let _ = self
+                            .state
+                            .runtime_cmd_tx
+                            .send(RuntimeCommand::MarkApplied(content_hash));
+                        self.show_tray_info(
+                            "ClipRelay",
+                            &format!("Clipboard applied from {}", sender_device_id),
+                        );
+                    }
+                }
+                Notification::File {
+                    sender_device_id,
+                    file_name,
+                    temp_path,
+                    ..
+                } => match save_temp_file_to_downloads(&temp_path, &file_name) {
+                    Ok(dest) => {
+                        let _ = std::fs::remove_file(&temp_path);
+                        self.show_tray_info(
+                            "ClipRelay",
+                            &format!("Saved file from {} to {}", sender_device_id, dest.display()),
+                        );
+                    }
+                    Err(err) => {
+                        warn!("save file failed: {}", err);
+                        self.show_tray_info("ClipRelay", "Failed to save received file");
+                    }
+                },
             }
 
             self.show_popup_if_needed();
@@ -879,7 +1135,10 @@ mod windows_client {
                 return;
             }
 
-            self.state.notifications.remove(0);
+            let n = self.state.notifications.remove(0);
+            if let Notification::File { temp_path, .. } = n {
+                let _ = std::fs::remove_file(&temp_path);
+            }
             self.show_popup_if_needed();
         }
     }
@@ -905,26 +1164,24 @@ mod windows_client {
         let args = match ClientArgs::try_parse() {
             Ok(args) => args,
             Err(err) => {
-                nwg::simple_message(
-                    "ClipRelay",
-                    &format!(
-                        "Failed to parse command line arguments.\n\n{}\n\nTip: this app needs at least --room-code when launched directly.",
-                        err
-                    ),
-                );
+                // In background mode we never show UI prompts.
+                error!("arg parse failed: {}", err);
                 std::process::exit(2);
             }
         };
 
-        let saved = match resolve_config(&args) {
+        let saved = match resolve_config(&args, !args.background) {
             Ok(Some(cfg)) => cfg,
             Ok(None) => {
                 std::process::exit(0);
             }
             Err(err) => {
                 error!("config resolution failed: {}", err);
-                nwg::simple_message("ClipRelay", &format!("Failed to start:\n\n{err}"));
-                std::process::exit(2);
+                if !args.background {
+                    nwg::simple_message("ClipRelay", &format!("Failed to start:\n\n{err}"));
+                    std::process::exit(2);
+                }
+                std::process::exit(0);
             }
         };
 
@@ -934,6 +1191,7 @@ mod windows_client {
             room_code: saved.room_code,
             device_name: saved.device_name,
             device_id: stable_device_id(),
+            background: args.background,
         };
 
         let _app = match ClipRelayTrayApp::build(cfg) {
@@ -948,7 +1206,7 @@ mod windows_client {
         nwg::dispatch_thread_events();
     }
 
-    fn resolve_config(args: &ClientArgs) -> Result<Option<SavedClientConfig>, String> {
+    fn resolve_config(args: &ClientArgs, interactive: bool) -> Result<Option<SavedClientConfig>, String> {
         if let Some(room_code) = args.room_code.as_deref() {
             let cfg = SavedClientConfig {
                 server_url: args.server_url.clone(),
@@ -965,13 +1223,21 @@ mod windows_client {
             Ok(None) => {}
             Err(err) => {
                 warn!("saved config invalid; prompting: {}", err);
-                nwg::simple_message(
-                    "ClipRelay",
-                    &format!(
-                        "Saved config was invalid and will be replaced after setup.\n\n{err}"
-                    ),
-                );
+                if interactive {
+                    nwg::simple_message(
+                        "ClipRelay",
+                        &format!(
+                            "Saved config was invalid and will be replaced after setup.\n\n{err}"
+                        ),
+                    );
+                } else {
+                    return Ok(None);
+                }
             }
+        }
+
+        if !interactive {
+            return Ok(None);
         }
 
         prompt_for_config_gui(&SavedClientConfig {
@@ -1305,6 +1571,7 @@ mod windows_client {
                 room_code: room_code.to_string(),
                 device_name: "TestDevice".to_string(),
                 device_id: stable_device_id(),
+                background: false,
             };
 
             let app = ClipRelayTrayApp::build(cfg).expect("build tray app");
@@ -1344,6 +1611,68 @@ mod windows_client {
             // SAFETY: See earlier set_var safety note.
             unsafe {
                 std::env::remove_var("CLIPRELAY_CONFIG_DIR");
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn file_chunk_reassembly_writes_expected_bytes() {
+            let unique = format!(
+                "cliprelay-test-data-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0)
+            );
+            let dir = std::env::temp_dir().join(unique);
+            let _ = std::fs::create_dir_all(&dir);
+
+            // SAFETY: This unit test runs in-process and only uses this env var within this test.
+            unsafe {
+                std::env::set_var("CLIPRELAY_DATA_DIR", &dir);
+            }
+
+            let sender = "sender-dev".to_string();
+            let transfer_id = "test-transfer".to_string();
+            let file_name = "hello.txt".to_string();
+            let data = b"hello file over cliprelay".to_vec();
+            let engine = base64::engine::general_purpose::STANDARD;
+            let chunk_b64 = engine.encode(&data);
+
+            let env = FileChunkEnvelope {
+                transfer_id: transfer_id.clone(),
+                file_name: file_name.clone(),
+                total_size: data.len() as u64,
+                chunk_index: 0,
+                total_chunks: 1,
+                chunk_b64,
+            };
+
+            let text = serde_json::to_string(&env).expect("serialize envelope");
+            let completed = handle_file_chunk_event(
+                &ClientConfig {
+                    server_url: "ws://127.0.0.1:1/ws".to_string(),
+                    room_code: "room".to_string(),
+                    room_id: "roomid".to_string(),
+                    device_id: "local".to_string(),
+                    device_name: "local".to_string(),
+                    background: false,
+                },
+                &std::sync::mpsc::channel().0,
+                sender,
+                &text,
+            )
+            .expect("handle chunk")
+            .expect("completed");
+
+            let written = std::fs::read(&completed.temp_path).expect("read temp file");
+            assert_eq!(written, data);
+
+            let _ = std::fs::remove_file(&completed.temp_path);
+            // SAFETY: See earlier set_var safety note.
+            unsafe {
+                std::env::remove_var("CLIPRELAY_DATA_DIR");
             }
             let _ = std::fs::remove_dir_all(&dir);
         }
@@ -1494,13 +1823,6 @@ mod windows_client {
             shared_state.clone(),
         ));
 
-        let clipboard_task = tokio::spawn(clipboard_monitor_task(
-            config.clone(),
-            network_send_tx.clone(),
-            ui_event_tx.clone(),
-            shared_state.clone(),
-        ));
-
         let command_task = tokio::spawn(runtime_command_task(
             runtime_cmd_rx,
             shared_state,
@@ -1513,7 +1835,6 @@ mod windows_client {
             _ = send_task => {}
             _ = receive_task => {}
             _ = presence_task => {}
-            _ = clipboard_task => {}
         }
 
         command_task.abort();
@@ -1561,7 +1882,7 @@ mod windows_client {
                         sender_device_id: config.device_id.clone(),
                         counter,
                         timestamp_unix_ms: now_unix_ms(),
-                        mime: "text/plain".to_owned(),
+                        mime: MIME_TEXT_PLAIN.to_owned(),
                         text_utf8: text,
                     };
 
@@ -1575,6 +1896,20 @@ mod windows_client {
                                 "send failed: encryption failed: {err}",
                             )));
                         }
+                    }
+                }
+                RuntimeCommand::SendFile(path) => {
+                    if let Err(err) = send_file_v1(
+                        &path,
+                        &config,
+                        &shared_state,
+                        &network_send_tx,
+                        &mut counter,
+                        &ui_event_tx,
+                    )
+                    .await
+                    {
+                        let _ = ui_event_tx.send(UiEvent::RuntimeError(format!("send file failed: {err}")));
                     }
                 }
             }
@@ -1594,6 +1929,7 @@ mod windows_client {
                 }
             }
             RuntimeCommand::SendText(_) => {}
+            RuntimeCommand::SendFile(_) => {}
         }
     }
 
@@ -1677,27 +2013,350 @@ mod windows_client {
                             }
                         };
 
-                        let content_hash = sha256_bytes(event.text_utf8.as_bytes());
-                        let duplicate_of_last_apply = shared_state
-                            .last_applied_hash
-                            .lock()
-                            .ok()
-                            .and_then(|guard| *guard)
-                            .is_some_and(|last| last == content_hash);
-                        if duplicate_of_last_apply {
+                        if event.mime == MIME_TEXT_PLAIN {
+                            let content_hash = sha256_bytes(event.text_utf8.as_bytes());
+                            let duplicate_of_last_apply = shared_state
+                                .last_applied_hash
+                                .lock()
+                                .ok()
+                                .and_then(|guard| *guard)
+                                .is_some_and(|last| last == content_hash);
+                            if duplicate_of_last_apply {
+                                continue;
+                            }
+
+                            let _ = ui_event_tx.send(UiEvent::LastReceived(now_unix_ms()));
+                            let _ = ui_event_tx.send(UiEvent::IncomingClipboard {
+                                sender_device_id: event.sender_device_id,
+                                text: event.text_utf8,
+                                content_hash,
+                            });
                             continue;
                         }
 
-                        let _ = ui_event_tx.send(UiEvent::LastReceived(now_unix_ms()));
-                        let _ = ui_event_tx.send(UiEvent::IncomingClipboard {
-                            sender_device_id: event.sender_device_id,
-                            text: event.text_utf8,
-                            content_hash,
-                        });
+                        if event.mime == MIME_FILE_CHUNK_JSON_B64 {
+                            if let Ok(Some(completed)) = handle_file_chunk_event(
+                                &config,
+                                &ui_event_tx,
+                                event.sender_device_id,
+                                &event.text_utf8,
+                            ) {
+                                let _ = ui_event_tx.send(UiEvent::LastReceived(now_unix_ms()));
+                                let _ = ui_event_tx.send(UiEvent::IncomingFile {
+                                    sender_device_id: completed.sender_device_id,
+                                    file_name: completed.file_name,
+                                    temp_path: completed.temp_path,
+                                    size_bytes: completed.size_bytes,
+                                });
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct FileChunkEnvelope {
+        transfer_id: String,
+        file_name: String,
+        total_size: u64,
+        chunk_index: u32,
+        total_chunks: u32,
+        chunk_b64: String,
+    }
+
+    #[derive(Debug)]
+    struct CompletedFile {
+        sender_device_id: String,
+        file_name: String,
+        temp_path: PathBuf,
+        size_bytes: u64,
+    }
+
+    #[derive(Debug)]
+    struct InflightTransfer {
+        sender_device_id: String,
+        file_name: String,
+        total_size: u64,
+        total_chunks: u32,
+        received: Vec<Option<Vec<u8>>>,
+        last_update_ms: u64,
+    }
+
+    fn max_file_bytes() -> u64 {
+        // Hard cap to keep the cloud relay usage free/small.
+        DEFAULT_MAX_FILE_BYTES
+    }
+
+    async fn send_file_v1(
+        path: &PathBuf,
+        config: &ClientConfig,
+        shared_state: &SharedRuntimeState,
+        network_send_tx: &mpsc::UnboundedSender<WireMessage>,
+        counter: &mut u64,
+        ui_event_tx: &std::sync::mpsc::Sender<UiEvent>,
+    ) -> Result<(), String> {
+        let path = path.clone();
+
+        let max_bytes = max_file_bytes();
+        let (file_name, data) = tokio::task::spawn_blocking(move || {
+            let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+            let len = meta.len();
+            if len == 0 {
+                return Err("file is empty".to_string());
+            }
+            if len > max_bytes {
+                return Err(format!(
+                    "file too large ({} bytes); limit is {} bytes",
+                    len, max_bytes
+                ));
+            }
+            let name = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| "invalid file name".to_string())?
+                .to_string();
+            let data = std::fs::read(&path).map_err(|e| e.to_string())?;
+            Ok::<_, String>((name, data))
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+
+        let room_key = shared_state.room_key.lock().ok().and_then(|lock| *lock);
+        let room_key = room_key.ok_or_else(|| "room key not ready".to_string())?;
+
+        let transfer_id = {
+            let digest = Sha256::digest(format!("{}:{}:{}", config.device_id, now_unix_ms(), file_name).as_bytes());
+            hex::encode(&digest[..16])
+        };
+
+        let total_size = u64::try_from(data.len()).map_err(|_| "file too large for u64".to_string())?;
+        let total_chunks = ((data.len() + FILE_CHUNK_RAW_BYTES - 1) / FILE_CHUNK_RAW_BYTES) as u32;
+        if total_chunks == 0 {
+            return Err("file produced no chunks".to_string());
+        }
+        if total_chunks > MAX_TOTAL_CHUNKS {
+            return Err(format!(
+                "file would require too many chunks ({total_chunks}); increase chunk size or lower file size"
+            ));
+        }
+
+        let engine = base64::engine::general_purpose::STANDARD;
+        for chunk_index in 0..total_chunks {
+            let start = (chunk_index as usize) * FILE_CHUNK_RAW_BYTES;
+            let end = ((chunk_index as usize) + 1) * FILE_CHUNK_RAW_BYTES;
+            let end = end.min(data.len());
+            let raw = &data[start..end];
+            let chunk_b64 = engine.encode(raw);
+
+            let env = FileChunkEnvelope {
+                transfer_id: transfer_id.clone(),
+                file_name: file_name.clone(),
+                total_size,
+                chunk_index,
+                total_chunks,
+                chunk_b64,
+            };
+
+            let text_utf8 = serde_json::to_string(&env).map_err(|e| e.to_string())?;
+            if text_utf8.len() > MAX_CLIPBOARD_TEXT_BYTES {
+                return Err("internal: chunk envelope exceeds max event size".to_string());
+            }
+
+            *counter = counter.saturating_add(1);
+            let plaintext = ClipboardEventPlaintext {
+                sender_device_id: config.device_id.clone(),
+                counter: *counter,
+                timestamp_unix_ms: now_unix_ms(),
+                mime: MIME_FILE_CHUNK_JSON_B64.to_owned(),
+                text_utf8,
+            };
+
+            let payload = encrypt_clipboard_event(&room_key, &plaintext).map_err(|e| e.to_string())?;
+            network_send_clipboard(network_send_tx, payload).await;
+        }
+
+        let _ = ui_event_tx.send(UiEvent::LastSent(now_unix_ms()));
+        Ok(())
+    }
+
+    // NOTE: This is a minimal in-memory reassembly.
+    // Since the relay does not persist messages, missing chunks will stall until overwritten.
+    fn handle_file_chunk_event(
+        _config: &ClientConfig,
+        _ui_event_tx: &std::sync::mpsc::Sender<UiEvent>,
+        sender_device_id: String,
+        text_utf8: &str,
+    ) -> Result<Option<CompletedFile>, String> {
+        use std::sync::OnceLock;
+
+        static TRANSFERS: OnceLock<Mutex<HashMap<String, InflightTransfer>>> = OnceLock::new();
+        let transfers = TRANSFERS.get_or_init(|| Mutex::new(HashMap::new()));
+
+        let env: FileChunkEnvelope = serde_json::from_str(text_utf8).map_err(|e| e.to_string())?;
+        if env.transfer_id.trim().is_empty() {
+            return Ok(None);
+        }
+
+        if env.total_chunks == 0 || env.total_chunks > MAX_TOTAL_CHUNKS {
+            return Ok(None);
+        }
+
+        if env.chunk_index >= env.total_chunks {
+            return Ok(None);
+        }
+
+        if env.total_size == 0 || env.total_size > max_file_bytes() {
+            return Ok(None);
+        }
+
+        let engine = base64::engine::general_purpose::STANDARD;
+        let chunk = engine
+            .decode(env.chunk_b64.as_bytes())
+            .map_err(|e| e.to_string())?;
+
+        if chunk.is_empty() {
+            return Ok(None);
+        }
+
+        let now = now_unix_ms();
+        let key = format!("{}:{}", sender_device_id, env.transfer_id);
+        let mut guard = transfers.lock().map_err(|_| "transfer map poisoned".to_string())?;
+
+        // Best-effort cleanup of stale transfers.
+        guard.retain(|_, t| now.saturating_sub(t.last_update_ms) <= TRANSFER_TIMEOUT_MS);
+        if !guard.contains_key(&key) && guard.len() >= MAX_INFLIGHT_TRANSFERS {
+            return Ok(None);
+        }
+
+        let entry = guard.entry(key).or_insert_with(|| InflightTransfer {
+            sender_device_id: sender_device_id.clone(),
+            file_name: sanitize_file_name(&env.file_name),
+            total_size: env.total_size,
+            total_chunks: env.total_chunks,
+            received: vec![None; env.total_chunks as usize],
+            last_update_ms: now,
+        });
+
+        // Basic consistency checks
+        if entry.total_chunks != env.total_chunks || entry.total_size != env.total_size {
+            return Ok(None);
+        }
+        entry.last_update_ms = now;
+
+        if entry.received[env.chunk_index as usize].is_none() {
+            entry.received[env.chunk_index as usize] = Some(chunk);
+        }
+
+        if entry.received.iter().any(|c| c.is_none()) {
+            return Ok(None);
+        }
+
+        // Complete
+        let mut out: Vec<u8> = Vec::with_capacity(entry.total_size as usize);
+        for c in entry.received.iter() {
+            if let Some(bytes) = c {
+                out.extend_from_slice(bytes);
+            }
+        }
+
+        if out.len() as u64 != entry.total_size {
+            return Ok(None);
+        }
+
+        let temp_path = write_incoming_temp_file(&entry.file_name, &out)?;
+        let completed = CompletedFile {
+            sender_device_id: entry.sender_device_id.clone(),
+            file_name: entry.file_name.clone(),
+            temp_path,
+            size_bytes: entry.total_size,
+        };
+
+        // Remove completed transfer to bound memory.
+        // (Reconstruct key from fields in a stable way.)
+        let completed_key = format!("{}:{}", completed.sender_device_id, env.transfer_id);
+        guard.remove(&completed_key);
+        Ok(Some(completed))
+    }
+
+    fn cliprelay_data_dir() -> PathBuf {
+        if let Some(override_dir) = std::env::var_os("CLIPRELAY_DATA_DIR") {
+            let dir = PathBuf::from(override_dir);
+            let _ = std::fs::create_dir_all(&dir);
+            return dir;
+        }
+
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let dir = base.join("ClipRelay");
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    fn write_incoming_temp_file(file_name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+        let dir = cliprelay_data_dir().join("incoming");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let safe = sanitize_file_name(file_name);
+        let path = dir.join(format!("incoming_{}_{}", now_unix_ms(), safe));
+        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(path)
+    }
+
+    fn sanitize_file_name(name: &str) -> String {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return "file.bin".to_string();
+        }
+        let mut out = String::with_capacity(trimmed.len());
+        for ch in trimmed.chars() {
+            if ch == '\\' || ch == '/' || ch == ':' || ch == '*' || ch == '?' || ch == '"' || ch == '<' || ch == '>' || ch == '|' {
+                out.push('_');
+            } else if ch.is_control() {
+                out.push('_');
+            } else {
+                out.push(ch);
+            }
+        }
+        if out.len() > 128 {
+            out.truncate(128);
+        }
+        out
+    }
+
+    fn downloads_dir() -> PathBuf {
+        std::env::var_os("USERPROFILE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("Downloads")
+    }
+
+    fn save_temp_file_to_downloads(temp_path: &PathBuf, file_name: &str) -> Result<PathBuf, String> {
+        let base = downloads_dir().join("ClipRelay");
+        std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+        let safe = sanitize_file_name(file_name);
+
+        let mut dest = base.join(&safe);
+        if dest.exists() {
+            let safe_path = std::path::Path::new(&safe);
+            let stem = safe_path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+            let ext = safe_path.extension().and_then(|s| s.to_str());
+            for i in 1..=200 {
+                let candidate = if let Some(ext) = ext {
+                    base.join(format!("{stem} ({i}).{ext}"))
+                } else {
+                    base.join(format!("{stem} ({i})"))
+                };
+                if !candidate.exists() {
+                    dest = candidate;
+                    break;
+                }
+            }
+        }
+
+        std::fs::copy(temp_path, &dest).map_err(|e| e.to_string())?;
+        Ok(dest)
     }
 
     async fn network_send_clipboard(
@@ -1757,82 +2416,6 @@ mod windows_client {
                     let _ = ui_event_tx.send(UiEvent::RuntimeError(message));
                 }
                 ControlMessage::Hello(_) => {}
-            }
-        }
-    }
-
-    async fn clipboard_monitor_task(
-        config: ClientConfig,
-        network_send_tx: mpsc::UnboundedSender<WireMessage>,
-        ui_event_tx: std::sync::mpsc::Sender<UiEvent>,
-        shared_state: SharedRuntimeState,
-    ) {
-        let mut clipboard = match Clipboard::new() {
-            Ok(clipboard) => clipboard,
-            Err(err) => {
-                let _ = ui_event_tx.send(UiEvent::RuntimeError(format!("clipboard init failed: {}", err)));
-                return;
-            }
-        };
-
-        let mut ticker = interval(Duration::from_millis(250));
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-        let mut last_seen_hash: Option<[u8; 32]> = None;
-        let mut counter: u64 = 0;
-
-        loop {
-            ticker.tick().await;
-            let content = match clipboard.get_text() {
-                Ok(text) => text,
-                Err(_) => continue,
-            };
-
-            if content.len() > MAX_CLIPBOARD_TEXT_BYTES {
-                continue;
-            }
-
-            let content_hash = sha256_bytes(content.as_bytes());
-            if last_seen_hash.is_some_and(|h| h == content_hash) {
-                continue;
-            }
-
-            let duplicate_of_last_apply = shared_state
-                .last_applied_hash
-                .lock()
-                .ok()
-                .and_then(|guard| *guard)
-                .is_some_and(|last| last == content_hash);
-            if duplicate_of_last_apply {
-                last_seen_hash = Some(content_hash);
-                continue;
-            }
-
-            let room_key = shared_state.room_key.lock().ok().and_then(|lock| *lock);
-            let room_key = match room_key {
-                Some(key) => key,
-                None => {
-                    last_seen_hash = Some(content_hash);
-                    continue;
-                }
-            };
-
-            counter = counter.saturating_add(1);
-            let plaintext = ClipboardEventPlaintext {
-                sender_device_id: config.device_id.clone(),
-                counter,
-                timestamp_unix_ms: now_unix_ms(),
-                mime: "text/plain".to_owned(),
-                text_utf8: content.clone(),
-            };
-
-            match encrypt_clipboard_event(&room_key, &plaintext) {
-                Ok(payload) => {
-                    network_send_clipboard(&network_send_tx, payload).await;
-                    let _ = ui_event_tx.send(UiEvent::LastSent(now_unix_ms()));
-                    last_seen_hash = Some(content_hash);
-                }
-                Err(err) => warn!("encryption failed: {}", err),
             }
         }
     }

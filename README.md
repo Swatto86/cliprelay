@@ -136,14 +136,18 @@ Run a second client with the same room code and another device name.
 	- **Red**: disconnected / cannot reach relay
 	- **Amber**: connected, but no room key yet (usually means you’re the only device in the room)
 	- **Green**: connected and room key is ready
-- **Left-click tray icon**: opens/closes the **Send** window.
+- **Double-click tray icon**: opens/closes the **Send** window.
 - **Right-click tray icon**: opens a menu with **Options** and **Quit**.
 - **Options → Auto apply**
 	- Off (default): incoming clipboard text shows a popup; you choose **Apply** or **Dismiss**.
 	- On: incoming clipboard text is applied automatically.
+- **Options → Start with Windows**
+	- When enabled, ClipRelay writes a per-user startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that launches `"cliprelay-client.exe" --background` (WinAPI registry calls; no PowerShell).
 - **Send window**
-	- Type text and click **Send** to send that text to other devices in the same room.
+	- Type text and click **Send text** to send that text to other devices in the same room.
+	- Click **Send file…** to choose a file and send it to other devices in the same room.
 	- **Send** is disabled until the client is **Green** (room key ready), because encryption needs the derived room key.
+	- File limit is **5 MiB** (hard cap).
 
 Tip: for a quick self-test, run two clients on the same machine using the same `--room-code` but different `--device-name` values.
 
@@ -188,3 +192,8 @@ This enables the service at boot (`systemctl enable --now cliprelay-relay.servic
 - The relay only **forwards** WebSocket messages between currently-connected clients in the same room.
 - Clipboard payloads are **end-to-end encrypted**; the relay cannot decrypt them.
 - The relay does **not** store clipboard history and does **not** persist messages across restarts.
+
+## File Transfers (MVP)
+
+- Files are chunked and sent end-to-end encrypted through the relay.
+- Receiver gets a popup and can click **Save** to store the file under `Downloads\ClipRelay`.
