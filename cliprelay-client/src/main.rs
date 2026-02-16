@@ -2235,9 +2235,8 @@ mod windows_client {
         let y = (screen_h - height) / 2;
 
         nwg::Window::builder()
-            .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE)
+            .flags(nwg::WindowFlags::WINDOW)
             .size((width, height))
-            .position((x, y))
             .title("ClipRelay - Choose Room")
             .icon(Some(&icon_app))
             .build(&mut window)
@@ -2381,7 +2380,11 @@ mod windows_client {
             }
         }
 
+        // Correct size & center on screen using set_size/set_position which
+        // bypass the DPI double-scaling the Window builder applies.
+        ui.window.set_size(width as u32, height as u32);
         layout_choice(&ui);
+        ui.window.set_position(x, y);
         ui.window.set_visible(true);
 
         let result: Arc<Mutex<Option<RoomChoice>>> = Arc::new(Mutex::new(None));
@@ -2479,9 +2482,8 @@ mod windows_client {
         let y = (screen_h - height) / 2;
 
         nwg::Window::builder()
-            .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE)
+            .flags(nwg::WindowFlags::WINDOW)
             .size((width, height))
-            .position((x, y))
             .title("ClipRelay - Setup")
             .icon(Some(&icon_app))
             .build(&mut window)
@@ -2636,7 +2638,11 @@ mod windows_client {
             ui.button_cancel.set_size(btn_w as u32, btn_h as u32);
         }
 
+        // Correct size & center on screen using set_size/set_position which
+        // bypass the DPI double-scaling the Window builder applies.
+        ui.window.set_size(width as u32, height as u32);
         layout_setup(&ui);
+        ui.window.set_position(x, y);
         ui.window.set_visible(true);
         ui.input_room.set_focus();
 
