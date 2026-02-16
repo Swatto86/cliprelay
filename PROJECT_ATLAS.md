@@ -5,7 +5,7 @@ ClipRelay synchronizes clipboard text across online devices in a shared room usi
 
 ## Core Concepts
 - Room: logical shared channel identified by room code-derived room id.
-- Device: participant with `device_id` and `device_name`.
+- Client: participant with `device_id` and `device_name` (CLI flag: `--client-name`; defaults to the computer hostname).
 - Relay: transport and presence coordinator that forwards opaque encrypted payloads.
 - Clipboard event: plaintext text clipboard metadata encrypted client-side before transport.
 
@@ -19,12 +19,14 @@ ClipRelay synchronizes clipboard text across online devices in a shared room usi
 - `cliprelay-relay/src/lib.rs`: reusable relay app/router/server logic.
 - `cliprelay-relay/src/main.rs`: relay CLI entrypoint.
 - `cliprelay-relay/tests/e2e_relay.rs`: relay E2E integration tests (forwarding, capacity, invalid-first-frame, sender-mismatch, malformed-frame, unexpected-control).
-- `cliprelay-client/src/main.rs`: native-windows-gui tray-first app (WinAPI-native, DPI-aware) with status-indicator tray icons, left-click open send UI, and right-click options/quit menu.
+- `cliprelay-client/src/main.rs`: native-windows-gui tray-first app (WinAPI-native, DPI-aware) with status-indicator tray icons, left-click open send UI, and right-click options/quit menu. Contains reconnection loop, WebSocket keepalive pings, and dynamic dialog layout.
+- `cliprelay-client/src/ui_layout.rs`: UI sizing constants.
 - `cliprelay-client/src/ui_state.rs`: UI window placement persistence (load/save with size bounds, clamping helper).
 - `cliprelay-client/assets/app.manifest`: Windows manifest with per-monitor DPI awareness and common-controls v6.
 - `cliprelay-client/assets/app-icon-circle-c.ico`: client icon used for tray + executable resources.
 - `cliprelay-client/build.rs`: Windows resource embedding (icon via winres, manifest via MSVC linker) ensuring taskbar icon and Common Controls v6 support.
 - `cliprelay-client/tests/ui_state.rs`: regression tests for window placement persistence helpers.
+- `cliprelay-client/tests/windows_manifest.rs`: verifies the release binary embeds the Win32 manifest.
 - `update-application.ps1`: release automation script (version bump, validation, tagging, push, old-tag cleanup) with `-DryRun` preview mode.
 - `docs/HOW_IT_WORKS.md`: end-to-end architecture + user guide + cloud ops notes (Caddy + systemd).
 - `deploy/cliprelay-relay.service`: systemd unit for running the relay on Linux hosts.
@@ -34,21 +36,37 @@ ClipRelay synchronizes clipboard text across online devices in a shared room usi
 
 ## Entry Points
 - Relay executable: `cliprelay-relay` (`--bind-address`).
-- Client executable: `cliprelay-client` (`--server-url`, `--room-code`, `--device-name`).
+- Client executable: `cliprelay-client` (`--server-url`, `--room-code`, `--client-name`).
+  - Default server URL: `wss://relay.swatto.co.uk/ws`
+  - Default client name: computer hostname (`COMPUTERNAME` / `HOSTNAME` env var)
+
+## Key Architectural Patterns
+
+### Reconnection Loop
+`run_client_runtime()` is an outer reconnection loop that calls `run_single_session()` for each WebSocket session. The `runtime_cmd_rx` channel (UI → runtime commands) persists across reconnections via `&mut` borrow, ensuring commands queued during a disconnect are delivered to the next session. Reconnection delay is 5 seconds.
+
+### WebSocket Keepalive
+`network_send_task()` sends WebSocket Ping frames every 30 seconds via `tokio::select!` between the outgoing message channel and a ping interval timer. This prevents reverse proxies (e.g. Caddy) from closing idle connections when split WebSocket streams fail to auto-flush Pong responses.
+
+### Dynamic Dialog Layout
+Modal dialogs (Setup, Choose Room) use inner layout functions (`layout_setup`, `layout_choice`) that compute all control positions relative to the current window size. These are called on `OnResize` / `OnResizeEnd` events and also at initial build, ensuring consistent layout across all DPI/resolution combinations.
 
 ## Build/Test/Run
 - Build: `cargo check`
 - Core unit tests: `cargo test -p cliprelay-core`
+- Client tests: `cargo test -p cliprelay-client`
 - Relay E2E: `cargo test -p cliprelay-relay --test e2e_relay`
 - CI workflow: `.github/workflows/ci.yml` (runs check + core tests + relay E2E on `main` pushes and pull requests)
 - Release workflow: `.github/workflows/release.yml` (runs on `v*.*.*` tags and publishes Linux/Windows relay binaries)
 
 ## Configuration Ownership
 - Relay bind address: CLI flag on relay.
-- Client room/server/device identity: CLI flags on client.
+- Client room/server/client identity: CLI flags on client (`--server-url`, `--room-code`, `--client-name`).
+- Saved client config: `%LOCALAPPDATA%\ClipRelay\config.json` (field `device_name` preserved for backward compatibility).
 
 ## Critical Invariants
 - Relay forwards only opaque encrypted payloads and never decrypts clipboard text.
 - Room size must not exceed `MAX_DEVICES_PER_ROOM`.
 - Frame size must not exceed `MAX_RELAY_MESSAGE_BYTES`.
 - Replay counters are monotonic per sender on receiving client.
+- WebSocket sessions must send keepalive pings to survive reverse-proxy idle timeouts.

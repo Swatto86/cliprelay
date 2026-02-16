@@ -116,14 +116,14 @@ Each sender has a monotonic counter (per sender). Receivers reject stale/duplica
 
 You can start the client either:
 
-- via CLI (`--server-url`, `--room-code`, `--device-name`), or
+- via CLI (`--server-url`, `--room-code`, `--client-name`), or
 - by double-clicking the EXE.
 
 If `--room-code` is omitted and no saved config exists, a **Setup** window prompts for:
 
 - Room code
 - Server URL (`ws://` or `wss://`)
-- Device name
+- Client name (defaults to computer hostname)
 
 Saved config path:
 

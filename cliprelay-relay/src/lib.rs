@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, sync::Arc, time::Duration, time::Instant};
 
 use axum::{
     Json, Router,
@@ -127,10 +127,34 @@ async fn handle_socket(
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel::<Message>();
 
+    // Keepalive interval for the per-client write half.  When using split
+    // WebSocket streams, Pong responses to incoming Pings are queued by the
+    // read half but only flushed when the write half actually sends data.
+    // Without periodic writes, a reverse proxy (e.g. Caddy) may consider
+    // the relay-side connection idle/dead and close it.
+    const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+
     let send_task = tokio::spawn(async move {
-        while let Some(message) = outbound_rx.recv().await {
-            if ws_sender.send(message).await.is_err() {
-                break;
+        let mut ping_interval = tokio::time::interval(KEEPALIVE_INTERVAL);
+        ping_interval.tick().await; // skip first immediate tick
+
+        loop {
+            tokio::select! {
+                msg = outbound_rx.recv() => {
+                    match msg {
+                        Some(message) => {
+                            if ws_sender.send(message).await.is_err() {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                _ = ping_interval.tick() => {
+                    if ws_sender.send(Message::Ping(Vec::new().into())).await.is_err() {
+                        break;
+                    }
+                }
             }
         }
     });

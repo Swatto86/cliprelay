@@ -123,7 +123,7 @@ curl http://127.0.0.1:8080/healthz
 ## Run Client
 
 ```powershell
-cargo run -p cliprelay-client -- --server-url ws://127.0.0.1:8080/ws --room-code correct-horse-battery-staple --device-name Laptop
+cargo run -p cliprelay-client -- --server-url wss://relay.swatto.co.uk/ws --room-code correct-horse-battery-staple --client-name Laptop
 ```
 
 When launched **without** `--room-code`, the Windows client displays a **Room Choice** dialog on every launch:
@@ -136,7 +136,7 @@ When launched **without** `--room-code`, the Windows client displays a **Room Ch
 
 The setup saves your configuration to `%LOCALAPPDATA%\ClipRelay\config.json` for future use.
 
-Run a second client with the same room code and another device name.
+Run a second client with the same room code and another client name.
 
 ## Windows Tray Client Guide
 
@@ -157,7 +157,7 @@ Run a second client with the same room code and another device name.
 	- **Send** is disabled until the client is **Green** (room key ready), because encryption needs the derived room key.
 	- File limit is **5 MiB** (hard cap).
 
-Tip: for a quick self-test, run two clients on the same machine using the same `--room-code` but different `--device-name` values.
+Tip: for a quick self-test, run two clients on the same machine using the same `--room-code` but different `--client-name` values.
 
 ## Typical Usage
 
@@ -178,10 +178,10 @@ Tip: for a quick self-test, run two clients on the same machine using the same `
 If you are using the hosted relay at `relay.swatto.co.uk`:
 
 ```powershell
-cargo run -p cliprelay-client -- --server-url wss://relay.swatto.co.uk/ws --room-code my-room --device-name MyPC
+cargo run -p cliprelay-client -- --server-url wss://relay.swatto.co.uk/ws --room-code my-room --client-name MyPC
 ```
 
-Run a second client with the same `--room-code`.
+Run a second client with the same `--room-code`. The `--client-name` defaults to your computer's hostname if omitted.
 
 Full walkthrough (architecture + user guide + cloud ops/Caddy/systemd): `docs/HOW_IT_WORKS.md`.
 

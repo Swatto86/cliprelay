@@ -105,15 +105,22 @@ mod windows_client {
     static TRAY_ICON_AMBER_BYTES: &[u8] = include_bytes!("../assets/tray-amber.ico");
     static TRAY_ICON_GREEN_BYTES: &[u8] = include_bytes!("../assets/tray-green.ico");
     static APP_ICON_BYTES: &[u8] = include_bytes!("../assets/app-icon-circle-c.ico");
+    fn default_client_name() -> String {
+        std::env::var("COMPUTERNAME")
+            .ok()
+            .or_else(|| std::env::var("HOSTNAME").ok())
+            .unwrap_or_else(|| "ClipRelay Client".to_owned())
+    }
+
     #[derive(Parser, Debug, Clone)]
     #[command(name = "cliprelay-client")]
     struct ClientArgs {
-        #[arg(long, default_value = "ws://127.0.0.1:8080/ws")]
+        #[arg(long, default_value = "wss://relay.swatto.co.uk/ws")]
         server_url: String,
         #[arg(long)]
         room_code: Option<String>,
-        #[arg(long, default_value = "ClipRelay Device")]
-        device_name: String,
+        #[arg(long = "client-name", default_value_t = default_client_name())]
+        client_name: String,
 
         /// When set, the app will not show setup prompts; it will load saved config if present and otherwise exit.
         #[arg(long, default_value_t = false)]
@@ -362,6 +369,11 @@ mod windows_client {
 
         ui_state: SavedUiState,
         last_ui_state_save_ms: Option<u64>,
+
+        /// Cached text last written to options_info_box.  We only call
+        /// `set_text()` when the content actually changes so the user's
+        /// scroll position is preserved.
+        last_options_text: String,
     }
 
     impl ClipRelayTrayApp {
@@ -387,10 +399,11 @@ mod windows_client {
                     ActivityDirection::Sent => "SENT",
                     ActivityDirection::Received => "RECV",
                 };
+                let ts = format_timestamp_local(entry.ts_unix_ms);
                 out.push_str(&format!(
                     "{}. [{}] {} {}: {}\r\n",
                     idx + 1,
-                    entry.ts_unix_ms,
+                    ts,
                     dir,
                     entry.kind,
                     entry.summary
@@ -703,8 +716,8 @@ mod windows_client {
                 .build(&mut tray_quit_item)
                 .map_err(|err| err.to_string())?;
 
-            let send_width = scale_px(480);
-            let send_height = scale_px(360);
+            let send_width = scale_px(480).min(nwg::Monitor::width() - scale_px(40));
+            let send_height = scale_px(360).min(nwg::Monitor::height() - scale_px(40));
             let send_x = (nwg::Monitor::width() - send_width) / 2;
             let send_y = (nwg::Monitor::height() - send_height) / 2;
 
@@ -732,6 +745,7 @@ mod windows_client {
                 .flags(
                     nwg::TextBoxFlags::TAB_STOP
                         | nwg::TextBoxFlags::VISIBLE
+                        | nwg::TextBoxFlags::VSCROLL
                         | nwg::TextBoxFlags::AUTOVSCROLL,
                 )
                 .focus(true)
@@ -755,8 +769,10 @@ mod windows_client {
                 .build(&mut send_file_button)
                 .map_err(|err| err.to_string())?;
 
-            let options_width = scale_px(ui_layout::OPTIONS_DEFAULT_W_PX);
-            let options_height = scale_px(ui_layout::OPTIONS_DEFAULT_H_PX);
+            let options_width = scale_px(ui_layout::OPTIONS_DEFAULT_W_PX)
+                .min(nwg::Monitor::width() - scale_px(40));
+            let options_height = scale_px(ui_layout::OPTIONS_DEFAULT_H_PX)
+                .min(nwg::Monitor::height() - scale_px(40));
             let options_x = (nwg::Monitor::width() - options_width) / 2;
             let options_y = (nwg::Monitor::height() - options_height) / 2;
 
@@ -811,8 +827,8 @@ mod windows_client {
                 .build(&mut options_close_button)
                 .map_err(|err| err.to_string())?;
 
-            let popup_width = scale_px(480);
-            let popup_height = scale_px(280);
+            let popup_width = scale_px(480).min(nwg::Monitor::width() - scale_px(40));
+            let popup_height = scale_px(280).min(nwg::Monitor::height() - scale_px(40));
             let popup_x = (nwg::Monitor::width() - popup_width) / 2;
             let popup_y = (nwg::Monitor::height() - popup_height) / 2;
 
@@ -915,6 +931,7 @@ mod windows_client {
                 history,
                 ui_state,
                 last_ui_state_save_ms: None,
+                last_options_text: String::new(),
             }));
 
             {
@@ -1286,7 +1303,7 @@ mod windows_client {
             self.tray.set_tip(&tip);
         }
 
-        fn refresh_ui_texts(&self) {
+        fn refresh_ui_texts(&mut self) {
             let room_key_text = if self.state.room_key_ready {
                 "ready"
             } else if self.state.peers.is_empty() {
@@ -1328,7 +1345,7 @@ mod windows_client {
                 });
 
             let mut options_text = format!(
-                "Server URL: {}\r\nRoom code: {}\r\nRoom ID: {}\r\nDevice name: {}\r\nDevice id: {}\r\nLast counter (persisted): {}\r\nConnection: {}\r\nPeers: {}\r\nRoom key ready: {}\r\nLast sent: {}\r\nLast received: {}",
+                "Server URL: {}\r\nRoom code: {}\r\nRoom ID: {}\r\nClient name: {}\r\nDevice id: {}\r\nLast counter (persisted): {}\r\nConnection: {}\r\nPeers: {}\r\nRoom key ready: {}\r\nLast sent: {}\r\nLast received: {}",
                 self.config.server_url,
                 self.config.room_code,
                 self.config.room_id,
@@ -1344,16 +1361,19 @@ mod windows_client {
                 },
                 self.state
                     .last_sent_time
-                    .map(|x| x.to_string())
+                    .map(|x| format_timestamp_local(x))
                     .unwrap_or_else(|| "-".to_owned()),
                 self.state
                     .last_received_time
-                    .map(|x| x.to_string())
+                    .map(|x| format_timestamp_local(x))
                     .unwrap_or_else(|| "-".to_owned())
             );
 
             options_text.push_str(&self.format_history_for_options(30));
-            self.options_info_box.set_text(&options_text);
+            if options_text != self.last_options_text {
+                self.options_info_box.set_text(&options_text);
+                self.last_options_text = options_text;
+            }
 
             let error_line = self
                 .state
@@ -1734,7 +1754,7 @@ mod windows_client {
             let cfg = SavedClientConfig {
                 server_url: args.server_url.clone(),
                 room_code: room_code.to_string(),
-                device_name: args.device_name.clone(),
+                device_name: args.client_name.clone(),
                 last_counter: 0,
             };
             validate_saved_config(&cfg)?;
@@ -1780,7 +1800,7 @@ mod windows_client {
                 let defaults = saved_config.unwrap_or_else(|| SavedClientConfig {
                     server_url: args.server_url.clone(),
                     room_code: String::new(),
-                    device_name: args.device_name.clone(),
+                    device_name: args.client_name.clone(),
                     last_counter: 0,
                 });
                 prompt_for_config_gui(&defaults)
@@ -1830,10 +1850,10 @@ mod windows_client {
 
         let device_name = cfg.device_name.trim();
         if device_name.is_empty() {
-            errors.push("Device name is required.".to_string());
+            errors.push("Client name is required.".to_string());
         } else if device_name.len() > MAX_DEVICE_NAME_LEN {
             errors.push(format!(
-                "Device name is too long ({} > {} chars).",
+                "Client name is too long ({} > {} chars).",
                 device_name.len(),
                 MAX_DEVICE_NAME_LEN
             ));
@@ -1938,11 +1958,12 @@ mod windows_client {
         #[derive(Default)]
         struct ChoiceUi {
             window: nwg::Window,
-            _label_title: nwg::Label,
-            _label_info: nwg::Label,
+            label_title: nwg::Label,
+            label_info: nwg::Label,
             button_use_saved: nwg::Button,
             button_setup_new: nwg::Button,
             button_cancel: nwg::Button,
+            has_saved: bool,
         }
 
         let icon_app = nwg::Icon::from_bin(APP_ICON_BYTES).map_err(|err| err.to_string())?;
@@ -1961,8 +1982,13 @@ mod windows_client {
         } else {
             scale_px(ui_layout::CHOOSE_ROOM_NO_SAVED_H_PX)
         };
-        let x = (nwg::Monitor::width() - width) / 2;
-        let y = (nwg::Monitor::height() - height) / 2;
+        // Clamp to screen bounds so the dialog is usable on low-res screens.
+        let screen_w = nwg::Monitor::width();
+        let screen_h = nwg::Monitor::height();
+        let width = width.min(screen_w - scale_px(40));
+        let height = height.min(screen_h - scale_px(40));
+        let x = (screen_w - width) / 2;
+        let y = (screen_h - height) / 2;
 
         nwg::Window::builder()
             .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE)
@@ -1983,7 +2009,7 @@ mod windows_client {
 
         let info_text = if let Some(cfg) = saved_config {
             format!(
-                "You have a saved room:\n\nRoom: {}\nServer: {}\nDevice: {}\n\nUse saved room or setup a new one?",
+                "You have a saved room:\n\nRoom: {}\nServer: {}\nClient: {}\n\nUse saved room or setup a new one?",
                 cfg.room_code, cfg.server_url, cfg.device_name
             )
         } else {
@@ -2058,13 +2084,56 @@ mod windows_client {
 
         let ui = Rc::new(ChoiceUi {
             window,
-            _label_title: label_title,
-            _label_info: label_info,
+            label_title,
+            label_info,
             button_use_saved,
             button_setup_new,
             button_cancel,
+            has_saved,
         });
 
+        /// Dynamic layout function for the Choose Room dialog.  Positions
+        /// controls relative to the current window size so the dialog looks
+        /// correct at any resolution / DPI and adapts when resized.
+        fn layout_choice(ui: &ChoiceUi) {
+            let (w, h) = ui.window.size();
+            let w = w as i32;
+            let h = h as i32;
+            let margin = scale_px(16);
+            let gap = scale_px(10);
+            let title_h = scale_px(24);
+            let btn_h = scale_px(34);
+
+            // Title at top.
+            ui.label_title.set_position(margin, margin);
+            ui.label_title.set_size((w - margin * 2).max(scale_px(100)) as u32, title_h as u32);
+
+            // Info label fills the space between title and buttons.
+            let info_top = margin + title_h + gap;
+            let btn_top = h - margin - btn_h;
+            let info_h = (btn_top - gap - info_top).max(scale_px(48));
+            ui.label_info.set_position(margin, info_top);
+            ui.label_info.set_size((w - margin * 2).max(scale_px(100)) as u32, info_h as u32);
+
+            // Buttons at bottom.
+            if ui.has_saved {
+                let btn_w = ((w - margin * 2 - gap * 2) / 3).max(scale_px(120));
+                ui.button_use_saved.set_position(margin, btn_top);
+                ui.button_use_saved.set_size(btn_w as u32, btn_h as u32);
+                ui.button_setup_new.set_position(margin + btn_w + gap, btn_top);
+                ui.button_setup_new.set_size(btn_w as u32, btn_h as u32);
+                ui.button_cancel.set_position(margin + (btn_w + gap) * 2, btn_top);
+                ui.button_cancel.set_size(btn_w as u32, btn_h as u32);
+            } else {
+                let btn_w = ((w - margin * 2 - gap) / 2).max(scale_px(140));
+                ui.button_setup_new.set_position(margin, btn_top);
+                ui.button_setup_new.set_size(btn_w as u32, btn_h as u32);
+                ui.button_cancel.set_position(margin + btn_w + gap, btn_top);
+                ui.button_cancel.set_size(btn_w as u32, btn_h as u32);
+            }
+        }
+
+        layout_choice(&ui);
         ui.window.set_visible(true);
 
         let result: Arc<Mutex<Option<RoomChoice>>> = Arc::new(Mutex::new(None));
@@ -2074,6 +2143,10 @@ mod windows_client {
         let window_handle = ui.window.handle;
         let handler =
             nwg::full_bind_event_handler(&window_handle, move |event, _evt_data, handle| {
+                if event == nwg::Event::OnResize || event == nwg::Event::OnResizeEnd {
+                    layout_choice(&ui_for_handler);
+                }
+
                 let mut completed = false;
                 let mut choice = RoomChoice::Cancel;
 
@@ -2121,14 +2194,14 @@ mod windows_client {
         #[derive(Default)]
         struct SetupUi {
             window: nwg::Window,
-            _label_welcome: nwg::Label,
-            _label_room: nwg::Label,
+            label_welcome: nwg::Label,
+            label_room: nwg::Label,
             input_room: nwg::TextInput,
-            _label_server: nwg::Label,
+            label_server: nwg::Label,
             input_server: nwg::TextInput,
-            _label_device: nwg::Label,
+            label_device: nwg::Label,
             input_device: nwg::TextInput,
-            _label_tip: nwg::Label,
+            label_tip: nwg::Label,
             button_start: nwg::Button,
             button_cancel: nwg::Button,
         }
@@ -2147,10 +2220,15 @@ mod windows_client {
         let mut button_start = nwg::Button::default();
         let mut button_cancel = nwg::Button::default();
 
-        let width = scale_px(460);
-        let height = scale_px(280);
-        let x = (nwg::Monitor::width() - width) / 2;
-        let y = (nwg::Monitor::height() - height) / 2;
+        let width = scale_px(520);
+        let height = scale_px(340);
+        // Clamp to screen bounds so the dialog is usable even at low resolutions.
+        let screen_w = nwg::Monitor::width();
+        let screen_h = nwg::Monitor::height();
+        let width = width.min(screen_w - scale_px(40));
+        let height = height.min(screen_h - scale_px(40));
+        let x = (screen_w - width) / 2;
+        let y = (screen_h - height) / 2;
 
         nwg::Window::builder()
             .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE)
@@ -2202,7 +2280,7 @@ mod windows_client {
             .map_err(|err| err.to_string())?;
 
         nwg::Label::builder()
-            .text("Device name:")
+            .text("Client Name:")
             .position((scale_px(16), scale_px(132)))
             .size((scale_px(100), scale_px(20)))
             .parent(&window)
@@ -2243,18 +2321,73 @@ mod windows_client {
 
         let ui = Rc::new(SetupUi {
             window,
-            _label_welcome: label_welcome,
-            _label_room: label_room,
+            label_welcome: label_welcome,
+            label_room: label_room,
             input_room,
-            _label_server: label_server,
+            label_server: label_server,
             input_server,
-            _label_device: label_device,
+            label_device: label_device,
             input_device,
-            _label_tip: label_tip,
+            label_tip: label_tip,
             button_start,
             button_cancel,
         });
 
+        // Dynamic layout function: positions controls relative to the current
+        // window size so the dialog looks correct at any resolution/DPI.
+        fn layout_setup(ui: &SetupUi) {
+            let (w, h) = ui.window.size();
+            let w = w as i32;
+            let h = h as i32;
+            let margin = scale_px(16);
+            let gap = scale_px(12);
+            let label_w = scale_px(120);
+            let row_h = scale_px(26);
+            let label_h = scale_px(20);
+            let btn_h = scale_px(34);
+            let btn_w = scale_px(100);
+            let content_w = (w - margin * 2).max(scale_px(200));
+            let input_x = margin + label_w + scale_px(4);
+            let input_w = (content_w - label_w - scale_px(4)).max(scale_px(100));
+
+            let mut y = margin;
+
+            ui.label_welcome.set_position(margin, y);
+            ui.label_welcome.set_size(content_w as u32, scale_px(24) as u32);
+            y += scale_px(24) + gap;
+
+            ui.label_room.set_position(margin, y + scale_px(3));
+            ui.label_room.set_size(label_w as u32, label_h as u32);
+            ui.input_room.set_position(input_x, y);
+            ui.input_room.set_size(input_w as u32, row_h as u32);
+            y += row_h + gap;
+
+            ui.label_server.set_position(margin, y + scale_px(3));
+            ui.label_server.set_size(label_w as u32, label_h as u32);
+            ui.input_server.set_position(input_x, y);
+            ui.input_server.set_size(input_w as u32, row_h as u32);
+            y += row_h + gap;
+
+            ui.label_device.set_position(margin, y + scale_px(3));
+            ui.label_device.set_size(label_w as u32, label_h as u32);
+            ui.input_device.set_position(input_x, y);
+            ui.input_device.set_size(input_w as u32, row_h as u32);
+            y += row_h + gap;
+
+            let btn_y = h - margin - btn_h;
+            let tip_h = (btn_y - gap - y).max(scale_px(30));
+            ui.label_tip.set_position(margin, y);
+            ui.label_tip.set_size(content_w as u32, tip_h as u32);
+
+            let btn2_x = (w - margin - btn_w).max(margin);
+            let btn1_x = (btn2_x - scale_px(8) - btn_w).max(margin);
+            ui.button_start.set_position(btn1_x, btn_y);
+            ui.button_start.set_size(btn_w as u32, btn_h as u32);
+            ui.button_cancel.set_position(btn2_x, btn_y);
+            ui.button_cancel.set_size(btn_w as u32, btn_h as u32);
+        }
+
+        layout_setup(&ui);
         ui.window.set_visible(true);
         ui.input_room.set_focus();
 
@@ -2265,6 +2398,10 @@ mod windows_client {
         let window_handle = ui.window.handle;
         let handler =
             nwg::full_bind_event_handler(&window_handle, move |event, _evt_data, handle| {
+                if event == nwg::Event::OnResize || event == nwg::Event::OnResizeEnd {
+                    layout_setup(&ui_for_handler);
+                }
+
                 let mut completed = false;
                 if event == nwg::Event::OnWindowClose {
                     completed = true;
@@ -2553,12 +2690,13 @@ mod windows_client {
     async fn run_client_runtime(
         config: ClientConfig,
         ui_event_tx: std::sync::mpsc::Sender<UiEvent>,
-        runtime_cmd_rx: mpsc::UnboundedReceiver<RuntimeCommand>,
+        mut runtime_cmd_rx: mpsc::UnboundedReceiver<RuntimeCommand>,
         shared_state: SharedRuntimeState,
     ) {
-        const MAX_CONNECT_ATTEMPTS: u32 = 3;
-        const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
-        const BACKOFF_BASE_MS: u64 = 200;
+        /// Delay between reconnection attempts (seconds).  Kept short so the user
+        /// doesn't wait too long after a transient disconnect, but long enough to
+        /// avoid hammering a broken server.
+        const RECONNECT_DELAY: Duration = Duration::from_secs(5);
 
         info!(
             server_url = %config.server_url,
@@ -2576,6 +2714,49 @@ mod windows_client {
             )));
             return;
         }
+
+        let mut counter: u64 = config.initial_counter;
+
+        loop {
+            info!("starting connection session");
+            run_single_session(
+                &config,
+                &ui_event_tx,
+                &mut runtime_cmd_rx,
+                &shared_state,
+                &mut counter,
+            )
+            .await;
+
+            // Clear room key and peer list on disconnect.
+            if let Ok(mut key_slot) = shared_state.room_key.lock() {
+                *key_slot = None;
+            }
+            let _ = ui_event_tx.send(UiEvent::RoomKeyReady(false));
+            let _ = ui_event_tx.send(UiEvent::Peers(Vec::new()));
+            let _ = ui_event_tx.send(UiEvent::ConnectionStatus("Reconnecting…".to_owned()));
+
+            info!(
+                delay_secs = RECONNECT_DELAY.as_secs(),
+                "waiting before reconnect"
+            );
+            tokio::time::sleep(RECONNECT_DELAY).await;
+        }
+    }
+
+    /// Run a single WebSocket session: connect, authenticate, process messages
+    /// and commands until the connection ends.  Returns when the session
+    /// terminates (the caller will retry).
+    async fn run_single_session(
+        config: &ClientConfig,
+        ui_event_tx: &std::sync::mpsc::Sender<UiEvent>,
+        runtime_cmd_rx: &mut mpsc::UnboundedReceiver<RuntimeCommand>,
+        shared_state: &SharedRuntimeState,
+        counter: &mut u64,
+    ) {
+        const MAX_CONNECT_ATTEMPTS: u32 = 3;
+        const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
+        const BACKOFF_BASE_MS: u64 = 200;
 
         let _ = ui_event_tx.send(UiEvent::ConnectionStatus("Connecting".to_owned()));
 
@@ -2656,46 +2837,50 @@ mod windows_client {
             shared_state.clone(),
         ));
 
-        let command_task = tokio::spawn(runtime_command_task(
-            runtime_cmd_rx,
-            shared_state.clone(),
-            network_send_tx.clone(),
-            config.clone(),
-            ui_event_tx.clone(),
-        ));
-
+        // Process runtime commands inline (not in a spawned task) so that
+        // `runtime_cmd_rx` survives across reconnections without being consumed.
         tokio::select! {
-            _ = send_task => {}
-            _ = receive_task => {}
-            _ = presence_task => {}
+            _ = send_task => {
+                info!("send task ended, session over");
+            }
+            _ = receive_task => {
+                info!("receive task ended, session over");
+            }
+            _ = presence_task => {
+                info!("presence task ended, session over");
+            }
+            _ = process_runtime_commands(
+                runtime_cmd_rx,
+                counter,
+                config,
+                shared_state,
+                &network_send_tx,
+                ui_event_tx,
+            ) => {
+                info!("command handler ended, session over");
+            }
         }
 
-        command_task.abort();
-
-        // If any task ends, treat the session as disconnected and update UI accordingly.
-        if let Ok(mut key_slot) = shared_state.room_key.lock() {
-            *key_slot = None;
-        }
-        let _ = ui_event_tx.send(UiEvent::RoomKeyReady(false));
-        let _ = ui_event_tx.send(UiEvent::ConnectionStatus("Disconnected".to_owned()));
+        // If any task ends, treat the session as disconnected.
         let _ = ui_event_tx.send(UiEvent::RuntimeError(
-            "connection ended (send/receive task stopped)".to_owned(),
+            "connection ended – will reconnect".to_owned(),
         ));
     }
 
-    async fn runtime_command_task(
-        mut runtime_cmd_rx: mpsc::UnboundedReceiver<RuntimeCommand>,
-        shared_state: SharedRuntimeState,
-        network_send_tx: mpsc::UnboundedSender<WireMessage>,
-        config: ClientConfig,
-        ui_event_tx: std::sync::mpsc::Sender<UiEvent>,
+    /// Inline command handler that borrows `runtime_cmd_rx` so the receiver
+    /// survives across reconnection iterations without being moved/consumed.
+    async fn process_runtime_commands(
+        runtime_cmd_rx: &mut mpsc::UnboundedReceiver<RuntimeCommand>,
+        counter: &mut u64,
+        config: &ClientConfig,
+        shared_state: &SharedRuntimeState,
+        network_send_tx: &mpsc::UnboundedSender<WireMessage>,
+        ui_event_tx: &std::sync::mpsc::Sender<UiEvent>,
     ) {
-        let mut counter: u64 = config.initial_counter;
-
         while let Some(command) = runtime_cmd_rx.recv().await {
             match command {
                 RuntimeCommand::SetAutoApply(_) | RuntimeCommand::MarkApplied(_) => {
-                    handle_runtime_command(command, &shared_state);
+                    handle_runtime_command(command, shared_state);
                 }
                 RuntimeCommand::SendText(text) => {
                     if text.trim().is_empty() {
@@ -2720,11 +2905,11 @@ mod windows_client {
                         }
                     };
 
-                    counter = counter.saturating_add(1);
-                    info!(counter, bytes = text.len(), "queueing encrypted text send");
+                    *counter = counter.saturating_add(1);
+                    info!(counter = *counter, bytes = text.len(), "queueing encrypted text send");
                     let plaintext = ClipboardEventPlaintext {
                         sender_device_id: config.device_id.clone(),
-                        counter,
+                        counter: *counter,
                         timestamp_unix_ms: now_unix_ms(),
                         mime: MIME_TEXT_PLAIN.to_owned(),
                         text_utf8: text,
@@ -2732,9 +2917,9 @@ mod windows_client {
 
                     match encrypt_clipboard_event(&room_key, &plaintext) {
                         Ok(payload) => {
-                            network_send_clipboard(&network_send_tx, payload).await;
+                            network_send_clipboard(network_send_tx, payload).await;
                             let _ = ui_event_tx.send(UiEvent::LastSent(now_unix_ms()));
-                            persist_last_counter(&config, counter);
+                            persist_last_counter(config, *counter);
                         }
                         Err(err) => {
                             let _ = ui_event_tx.send(UiEvent::RuntimeError(format!(
@@ -2746,18 +2931,18 @@ mod windows_client {
                 RuntimeCommand::SendFile(path) => {
                     if let Err(err) = send_file_v1(
                         &path,
-                        &config,
-                        &shared_state,
-                        &network_send_tx,
-                        &mut counter,
-                        &ui_event_tx,
+                        config,
+                        shared_state,
+                        network_send_tx,
+                        counter,
+                        ui_event_tx,
                     )
                     .await
                     {
                         let _ = ui_event_tx
                             .send(UiEvent::RuntimeError(format!("send file failed: {err}")));
                     } else {
-                        persist_last_counter(&config, counter);
+                        persist_last_counter(config, *counter);
                     }
                 }
             }
@@ -2790,14 +2975,53 @@ mod windows_client {
         >,
         mut outgoing_rx: mpsc::UnboundedReceiver<WireMessage>,
     ) {
-        while let Some(message) = outgoing_rx.recv().await {
-            match encode_frame(&message) {
-                Ok(frame) => {
-                    if ws_write.send(Message::Binary(frame.into())).await.is_err() {
+        /// Interval between WebSocket Ping frames.
+        ///
+        /// Keeps the connection alive through reverse proxies (e.g. Caddy) that
+        /// close idle WebSocket connections.  Also ensures any internally-queued
+        /// Pong responses (from server Pings) get flushed even when no
+        /// application-level messages are pending.
+        const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+
+        let mut ping_interval = tokio::time::interval(KEEPALIVE_INTERVAL);
+        // The first tick fires immediately — skip it so we don't send a ping
+        // right after the Hello.
+        ping_interval.tick().await;
+
+        loop {
+            tokio::select! {
+                msg = outgoing_rx.recv() => {
+                    match msg {
+                        Some(message) => {
+                            let label = match &message {
+                                WireMessage::Control(_) => "control",
+                                WireMessage::Encrypted(_) => "encrypted",
+                            };
+                            match encode_frame(&message) {
+                                Ok(frame) => {
+                                    let len = frame.len();
+                                    if ws_write.send(Message::Binary(frame.into())).await.is_err() {
+                                        warn!(kind = label, "ws send failed, connection lost");
+                                        break;
+                                    }
+                                    info!(kind = label, frame_bytes = len, "ws frame sent");
+                                }
+                                Err(err) => warn!("failed to encode outgoing frame: {}", err),
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                _ = ping_interval.tick() => {
+                    if ws_write
+                        .send(Message::Ping(vec![].into()))
+                        .await
+                        .is_err()
+                    {
+                        info!("keepalive ping failed, connection lost");
                         break;
                     }
                 }
-                Err(err) => warn!("failed to encode outgoing frame: {}", err),
             }
         }
     }
@@ -2855,7 +3079,14 @@ mod windows_client {
                         let maybe_key = shared_state.room_key.lock().ok().and_then(|lock| *lock);
                         let room_key = match maybe_key {
                             Some(room_key) => room_key,
-                            None => continue,
+                            None => {
+                                warn!(
+                                    sender = %encrypted.sender_device_id,
+                                    counter = encrypted.counter,
+                                    "dropping encrypted message: room key not ready"
+                                );
+                                continue;
+                            }
                         };
 
                         let event = match decrypt_clipboard_event(&room_key, &encrypted) {
@@ -3262,7 +3493,9 @@ mod windows_client {
         network_send_tx: &mpsc::UnboundedSender<WireMessage>,
         payload: EncryptedPayload,
     ) {
-        let _ = network_send_tx.send(WireMessage::Encrypted(payload));
+        if let Err(err) = network_send_tx.send(WireMessage::Encrypted(payload)) {
+            error!("network_send_clipboard channel closed: {err}");
+        }
     }
 
     async fn presence_task(
@@ -3365,6 +3598,74 @@ mod windows_client {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_else(|_| Duration::from_secs(0));
         duration.as_millis() as u64
+    }
+
+    /// Format a unix-millisecond timestamp as a human-readable local time string.
+    /// Falls back to the raw number if the conversion fails.
+    fn format_timestamp_local(unix_ms: u64) -> String {
+        let secs = (unix_ms / 1_000) as i64;
+        let sub_ms = (unix_ms % 1_000) as u32;
+
+        // Use Win32 FileTimeToSystemTime + SystemTimeToTzSpecificLocalTime
+        // to get the correct local timezone without a large chrono/time crate.
+        #[cfg(target_os = "windows")]
+        {
+            use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
+            use windows_sys::Win32::System::Time::{
+                FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime,
+            };
+
+            // Convert unix epoch seconds to Windows FILETIME (100-ns intervals
+            // since 1601-01-01).
+            const EPOCH_DIFF_100NS: i64 = 116_444_736_000_000_000;
+            let ft_val = secs
+                .checked_mul(10_000_000)
+                .and_then(|v| v.checked_add(EPOCH_DIFF_100NS))
+                .and_then(|v| v.checked_add(i64::from(sub_ms) * 10_000));
+
+            if let Some(ft_val) = ft_val {
+                let ft_utc = FILETIME {
+                    dwLowDateTime: ft_val as u32,
+                    dwHighDateTime: (ft_val >> 32) as u32,
+                };
+                let mut st_utc = SYSTEMTIME {
+                    wYear: 0,
+                    wMonth: 0,
+                    wDayOfWeek: 0,
+                    wDay: 0,
+                    wHour: 0,
+                    wMinute: 0,
+                    wSecond: 0,
+                    wMilliseconds: 0,
+                };
+                let mut st_local = st_utc;
+
+                // Safety: calling Win32 API with valid pointers to stack variables.
+                let ok = unsafe {
+                    FileTimeToSystemTime(&ft_utc, &mut st_utc) != 0
+                        && SystemTimeToTzSpecificLocalTime(
+                            std::ptr::null(),
+                            &st_utc,
+                            &mut st_local,
+                        ) != 0
+                };
+
+                if ok {
+                    return format!(
+                        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                        st_local.wYear,
+                        st_local.wMonth,
+                        st_local.wDay,
+                        st_local.wHour,
+                        st_local.wMinute,
+                        st_local.wSecond
+                    );
+                }
+            }
+        }
+
+        // Fallback: raw millisecond timestamp.
+        unix_ms.to_string()
     }
 
     fn sha256_bytes(bytes: &[u8]) -> [u8; 32] {
