@@ -99,7 +99,7 @@ mod windows_client {
     static TRAY_ICON_RED_BYTES: &[u8] = include_bytes!("../assets/tray-red.ico");
     static TRAY_ICON_AMBER_BYTES: &[u8] = include_bytes!("../assets/tray-amber.ico");
     static TRAY_ICON_GREEN_BYTES: &[u8] = include_bytes!("../assets/tray-green.ico");
-    static APP_ICON_BYTES: &[u8] = include_bytes!("../assets/cliprelay.ico");
+    static APP_ICON_BYTES: &[u8] = include_bytes!("../assets/app-icon-plain.ico");
     #[derive(Parser, Debug, Clone)]
     #[command(name = "cliprelay-client")]
     struct ClientArgs {
