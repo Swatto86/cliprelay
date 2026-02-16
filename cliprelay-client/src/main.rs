@@ -126,6 +126,7 @@ mod windows_client {
         device_id: String,
         device_name: String,
         background: bool,
+        initial_counter: u64,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +134,9 @@ mod windows_client {
         server_url: String,
         room_code: String,
         device_name: String,
+
+        #[serde(default)]
+        last_counter: u64,
     }
 
     const MAX_ROOM_CODE_LEN: usize = 128;
@@ -351,8 +355,8 @@ mod windows_client {
                 .build(&mut tray_quit_item)
                 .map_err(|err| err.to_string())?;
 
-            let send_width = scale_px(420);
-            let send_height = scale_px(340);
+            let send_width = scale_px(480);
+            let send_height = scale_px(360);
             let send_x = (nwg::Monitor::width() - send_width) / 2;
             let send_y = (nwg::Monitor::height() - send_height) / 2;
 
@@ -399,8 +403,8 @@ mod windows_client {
                 .build(&mut send_file_button)
                 .map_err(|err| err.to_string())?;
 
-            let options_width = scale_px(440);
-            let options_height = scale_px(340);
+            let options_width = scale_px(520);
+            let options_height = scale_px(380);
             let options_x = (nwg::Monitor::width() - options_width) / 2;
             let options_y = (nwg::Monitor::height() - options_height) / 2;
 
@@ -416,7 +420,7 @@ mod windows_client {
 
             nwg::TextBox::builder()
                 .position((scale_px(16), scale_px(14)))
-                .size((options_width - scale_px(32), scale_px(170)))
+                .size((options_width - scale_px(32), scale_px(210)))
                 .flags(nwg::TextBoxFlags::VISIBLE | nwg::TextBoxFlags::AUTOVSCROLL)
                 .readonly(true)
                 .parent(&options_window)
@@ -425,7 +429,7 @@ mod windows_client {
 
             nwg::CheckBox::builder()
                 .text("Automatically apply incoming clipboard changes")
-                .position((scale_px(16), scale_px(196)))
+                .position((scale_px(16), scale_px(240)))
                 .size((options_width - scale_px(32), scale_px(24)))
                 .parent(&options_window)
                 .build(&mut options_auto_apply_checkbox)
@@ -433,7 +437,7 @@ mod windows_client {
 
             nwg::CheckBox::builder()
                 .text("Start ClipRelay when Windows starts")
-                .position((scale_px(16), scale_px(228)))
+                .position((scale_px(16), scale_px(272)))
                 .size((options_width - scale_px(32), scale_px(24)))
                 .parent(&options_window)
                 .build(&mut options_autostart_checkbox)
@@ -441,7 +445,7 @@ mod windows_client {
 
             nwg::Label::builder()
                 .text("")
-                .position((scale_px(16), scale_px(260)))
+                .position((scale_px(16), scale_px(304)))
                 .size((options_width - scale_px(32), scale_px(20)))
                 .parent(&options_window)
                 .build(&mut options_error_label)
@@ -455,8 +459,8 @@ mod windows_client {
                 .build(&mut options_close_button)
                 .map_err(|err| err.to_string())?;
 
-            let popup_width = scale_px(420);
-            let popup_height = scale_px(260);
+            let popup_width = scale_px(480);
+            let popup_height = scale_px(280);
             let popup_x = (nwg::Monitor::width() - popup_width) / 2;
             let popup_y = (nwg::Monitor::height() - popup_height) / 2;
 
@@ -491,7 +495,7 @@ mod windows_client {
             nwg::Button::builder()
                 .text("Apply to Clipboard")
                 .position((scale_px(16), popup_height - scale_px(54)))
-                .size((scale_px(180), scale_px(36)))
+                .size((scale_px(220), scale_px(36)))
                 .parent(&popup_window)
                 .build(&mut popup_apply_button)
                 .map_err(|err| err.to_string())?;
@@ -1243,6 +1247,7 @@ mod windows_client {
             device_name: saved.device_name,
             device_id: stable_device_id(),
             background: args.background,
+            initial_counter: saved.last_counter,
         };
 
         let _app = match ClipRelayTrayApp::build(cfg) {
@@ -1273,6 +1278,7 @@ mod windows_client {
                 server_url: args.server_url.clone(),
                 room_code: room_code.to_string(),
                 device_name: args.device_name.clone(),
+                last_counter: 0,
             };
             validate_saved_config(&cfg)?;
             let _ = save_saved_config(&cfg);
@@ -1320,6 +1326,7 @@ mod windows_client {
                     server_url: args.server_url.clone(),
                     room_code: String::new(),
                     device_name: args.device_name.clone(),
+                    last_counter: 0,
                 });
                 prompt_for_config_gui(&defaults)
             }
@@ -1384,6 +1391,21 @@ mod windows_client {
                 "Please fix the following:\n\n- {}",
                 errors.join("\n- ")
             ))
+        }
+    }
+
+    fn persist_last_counter(config: &ClientConfig, last_counter: u64) {
+        // Best-effort persistence: keeps counters monotonic across restarts so replay protection
+        // doesn't drop messages when one peer restarts.
+        let cfg = SavedClientConfig {
+            server_url: config.server_url.clone(),
+            room_code: config.room_code.clone(),
+            device_name: config.device_name.clone(),
+            last_counter,
+        };
+
+        if let Err(err) = save_saved_config(&cfg) {
+            warn!("failed to persist last_counter: {err}");
         }
     }
 
@@ -1791,6 +1813,7 @@ mod windows_client {
                             room_code: ui_ref.input_room.text(),
                             server_url: ui_ref.input_server.text(),
                             device_name: ui_ref.input_device.text(),
+                            last_counter: 0,
                         };
                         if let Err(err) = validate_saved_config(&cfg) {
                             nwg::simple_message("ClipRelay Setup", &err);
@@ -1873,6 +1896,7 @@ mod windows_client {
                 server_url: "ws://127.0.0.1:8080/ws".to_string(),
                 room_code: "roundtrip-room".to_string(),
                 device_name: "Roundtrip".to_string(),
+                last_counter: 0,
             };
 
             save_saved_config(&cfg).expect("save config");
@@ -2121,7 +2145,7 @@ mod windows_client {
         config: ClientConfig,
         ui_event_tx: std::sync::mpsc::Sender<UiEvent>,
     ) {
-        let mut counter: u64 = 0;
+        let mut counter: u64 = config.initial_counter;
 
         while let Some(command) = runtime_cmd_rx.recv().await {
             match command {
@@ -2164,6 +2188,7 @@ mod windows_client {
                         Ok(payload) => {
                             network_send_clipboard(&network_send_tx, payload).await;
                             let _ = ui_event_tx.send(UiEvent::LastSent(now_unix_ms()));
+                            persist_last_counter(&config, counter);
                         }
                         Err(err) => {
                             let _ = ui_event_tx.send(UiEvent::RuntimeError(format!(
@@ -2185,6 +2210,8 @@ mod windows_client {
                     {
                         let _ = ui_event_tx
                             .send(UiEvent::RuntimeError(format!("send file failed: {err}")));
+                    } else {
+                        persist_last_counter(&config, counter);
                     }
                 }
             }
