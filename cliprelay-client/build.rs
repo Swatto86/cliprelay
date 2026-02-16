@@ -11,6 +11,15 @@ fn main() {
     // Use winres to embed icon (works cross-platform)
     let mut res = winres::WindowsResource::new();
     res.set_icon(icon_path.to_str().unwrap());
+
+    // Windows file properties (Explorer -> Details)
+    // Note: Windows doesn't have a standard "Developer" field for PE files; Explorer typically
+    // surfaces CompanyName as Developer/Company depending on the view.
+    res.set("CompanyName", "Swatto");
+    res.set("ProductName", "ClipRelay");
+    res.set("FileDescription", "ClipRelay Client");
+    res.set("InternalName", "cliprelay-client");
+    res.set("OriginalFilename", "cliprelay-client.exe");
     
     if let Err(e) = res.compile() {
         eprintln!("Warning: icon embedding failed: {}", e);

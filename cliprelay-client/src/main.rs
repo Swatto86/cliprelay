@@ -1506,7 +1506,7 @@ mod windows_client {
                 cfg.room_code, cfg.server_url, cfg.device_name
             )
         } else {
-            "Setup a new room to start syncing clipboards.".to_string()
+            "Setup a new room to start syncing files/text".to_string()
         };
 
         let info_height = if has_saved { scale_px(100) } else { scale_px(40) };
@@ -1522,15 +1522,15 @@ mod windows_client {
             nwg::Button::builder()
                 .text("Use Saved Room")
                 .position((scale_px(16), height - scale_px(52)))
-                .size((scale_px(130), scale_px(34)))
+                .size((scale_px(140), scale_px(34)))
                 .parent(&window)
                 .build(&mut button_use_saved)
                 .map_err(|err| err.to_string())?;
 
             nwg::Button::builder()
                 .text("Setup New Room")
-                .position((scale_px(154), height - scale_px(52)))
-                .size((scale_px(130), scale_px(34)))
+                .position((scale_px(164), height - scale_px(52)))
+                .size((scale_px(140), scale_px(34)))
                 .parent(&window)
                 .build(&mut button_setup_new)
                 .map_err(|err| err.to_string())?;
@@ -1546,7 +1546,7 @@ mod windows_client {
             nwg::Button::builder()
                 .text("Setup New Room")
                 .position((scale_px(16), height - scale_px(52)))
-                .size((scale_px(150), scale_px(34)))
+                .size((scale_px(170), scale_px(34)))
                 .parent(&window)
                 .build(&mut button_setup_new)
                 .map_err(|err| err.to_string())?;
