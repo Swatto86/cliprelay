@@ -1,0 +1,20 @@
+/target
+**/target/
+.git-backups-2026-02-16/
+
+# Rust/Cargo build artifacts
+**/*.rs.bk
+
+# Logs and coverage artifacts
+*.log
+*.tmp
+*.temp
+coverage/
+*.profraw
+*.profdata
+
+# OS/editor artifacts
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/.ropeproject/
