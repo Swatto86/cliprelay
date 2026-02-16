@@ -614,14 +614,14 @@ mod windows_client {
 
             let margin = scale_px(16);
             let gap = scale_px(10);
-            let checkbox_h = scale_px(24);
+            let checkbox_h = scale_px(26);
             let combo_h = scale_px(26);
             let btn_h = scale_px(36);
             let close_w = scale_px(110);
 
             let info_top = margin;
             let close_top = h - margin - btn_h;
-            let error_h = scale_px(20);
+            let error_h = scale_px(22);
 
             // Reserve: 2 checkboxes + hotkey row + error label + gaps
             let reserved = checkbox_h * 2 + combo_h + error_h + gap * 4;
@@ -645,7 +645,7 @@ mod windows_client {
             );
 
             let hotkey_y = cb2_y + checkbox_h + gap;
-            let label_w = scale_px(110);
+            let label_w = scale_px(120);
             self.options_hotkey_label
                 .set_position(margin, hotkey_y + scale_px(2));
             self.options_hotkey_label
@@ -876,23 +876,23 @@ mod windows_client {
             nwg::CheckBox::builder()
                 .text("Automatically apply incoming clipboard changes")
                 .position((scale_px(16), scale_px(240)))
-                .size((options_width - scale_px(32), scale_px(24)))
+                .size((options_width - scale_px(32), scale_px(26)))
                 .parent(&options_window)
                 .build(&mut options_auto_apply_checkbox)
                 .map_err(|err| err.to_string())?;
 
             nwg::CheckBox::builder()
                 .text("Start ClipRelay when Windows starts")
-                .position((scale_px(16), scale_px(272)))
-                .size((options_width - scale_px(32), scale_px(24)))
+                .position((scale_px(16), scale_px(278)))
+                .size((options_width - scale_px(32), scale_px(26)))
                 .parent(&options_window)
                 .build(&mut options_autostart_checkbox)
                 .map_err(|err| err.to_string())?;
 
             nwg::Label::builder()
                 .text("Global hotkey:")
-                .position((scale_px(16), scale_px(306)))
-                .size((scale_px(110), scale_px(24)))
+                .position((scale_px(16), scale_px(314)))
+                .size((scale_px(120), scale_px(26)))
                 .parent(&options_window)
                 .build(&mut options_hotkey_label)
                 .map_err(|err| err.to_string())?;
@@ -901,7 +901,7 @@ mod windows_client {
                 HOTKEY_PRESETS.iter().map(|p| p.label.to_owned()).collect();
             nwg::ComboBox::builder()
                 .collection(hotkey_items)
-                .position((scale_px(130), scale_px(304)))
+                .position((scale_px(140), scale_px(312)))
                 .size((scale_px(200), scale_px(26)))
                 .parent(&options_window)
                 .selected_index(Some(0))
@@ -910,8 +910,8 @@ mod windows_client {
 
             nwg::Label::builder()
                 .text("")
-                .position((scale_px(16), scale_px(340)))
-                .size((options_width - scale_px(32), scale_px(20)))
+                .position((scale_px(16), scale_px(350)))
+                .size((options_width - scale_px(32), scale_px(22)))
                 .parent(&options_window)
                 .build(&mut options_error_label)
                 .map_err(|err| err.to_string())?;
@@ -2500,7 +2500,7 @@ mod windows_client {
         nwg::Label::builder()
             .text("Room code:")
             .position((scale_px(16), scale_px(52)))
-            .size((scale_px(100), scale_px(20)))
+            .size((scale_px(120), scale_px(24)))
             .parent(&window)
             .build(&mut label_room)
             .map_err(|err| err.to_string())?;
@@ -2516,7 +2516,7 @@ mod windows_client {
         nwg::Label::builder()
             .text("Server URL:")
             .position((scale_px(16), scale_px(92)))
-            .size((scale_px(100), scale_px(20)))
+            .size((scale_px(120), scale_px(24)))
             .parent(&window)
             .build(&mut label_server)
             .map_err(|err| err.to_string())?;
@@ -2532,7 +2532,7 @@ mod windows_client {
         nwg::Label::builder()
             .text("Client Name:")
             .position((scale_px(16), scale_px(132)))
-            .size((scale_px(100), scale_px(20)))
+            .size((scale_px(120), scale_px(24)))
             .parent(&window)
             .build(&mut label_device)
             .map_err(|err| err.to_string())?;
@@ -2593,7 +2593,7 @@ mod windows_client {
             let gap = scale_px(12);
             let label_w = scale_px(120);
             let row_h = scale_px(26);
-            let label_h = scale_px(20);
+            let label_h = scale_px(24);
             let btn_h = scale_px(34);
             let btn_w = scale_px(100);
             let content_w = (w - margin * 2).max(scale_px(200));
