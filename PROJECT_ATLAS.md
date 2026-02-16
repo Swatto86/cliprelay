@@ -24,6 +24,9 @@ ClipRelay synchronizes clipboard text across online devices in a shared room usi
 - `cliprelay-client/assets/cliprelay.ico`: client icon used for tray + executable resources.
 - `cliprelay-client/build.rs`: Windows resource embedding pipeline (manifest + icon).
 - `update-application.ps1`: release automation script (version bump, validation, tagging, push, old-tag cleanup) with `-DryRun` preview mode.
+- `docs/HOW_IT_WORKS.md`: end-to-end architecture + user guide + cloud ops notes (Caddy + systemd).
+- `deploy/cliprelay-relay.service`: systemd unit for running the relay on Linux hosts.
+- `deploy/install-relay-systemd.sh`: idempotent installer that copies the relay binary, installs env/service files, and enables the service.
 - `.github/workflows/ci.yml`: PR/main validation workflow.
 - `.github/workflows/release.yml`: tag-triggered binary build + GitHub release publishing workflow.
 

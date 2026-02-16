@@ -26,7 +26,7 @@ sha2 = "0.10"
 thiserror = "2.0"
 tokio = { version = "1.44", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
 tokio-stream = "0.1"
-tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots", "native-tls"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 url = "2.5"

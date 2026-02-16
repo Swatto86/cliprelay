@@ -112,6 +112,8 @@ Endpoints:
 - WebSocket: `/ws`
 - Health: `/healthz`
 
+Note: the relay does not have a configured “room code”. It simply forwards messages within whatever `room_id` clients connect with.
+
 Example health check:
 
 ```powershell
@@ -124,7 +126,26 @@ curl http://127.0.0.1:8080/healthz
 cargo run -p cliprelay-client -- --server-url ws://127.0.0.1:8080/ws --room-code correct-horse-battery-staple --device-name Laptop
 ```
 
+If `--room-code` is omitted, the Windows client shows a small **Setup** window to collect `room code`, `server URL`, and `device name`, then saves it under `%LOCALAPPDATA%\ClipRelay\config.json`.
+
 Run a second client with the same room code and another device name.
+
+## Windows Tray Client Guide
+
+- **Tray status colors**
+	- **Red**: disconnected / cannot reach relay
+	- **Amber**: connected, but no room key yet (usually means you’re the only device in the room)
+	- **Green**: connected and room key is ready
+- **Left-click tray icon**: opens/closes the **Send** window.
+- **Right-click tray icon**: opens a menu with **Options** and **Quit**.
+- **Options → Auto apply**
+	- Off (default): incoming clipboard text shows a popup; you choose **Apply** or **Dismiss**.
+	- On: incoming clipboard text is applied automatically.
+- **Send window**
+	- Type text and click **Send** to send that text to other devices in the same room.
+	- **Send** is disabled until the client is **Green** (room key ready), because encryption needs the derived room key.
+
+Tip: for a quick self-test, run two clients on the same machine using the same `--room-code` but different `--device-name` values.
 
 ## Typical Usage
 
@@ -139,3 +160,31 @@ Run a second client with the same room code and another device name.
 - For internet deployment, place relay behind TLS termination and use `wss://` from clients.
 - The relay is lightweight and keeps only in-memory room/device state.
 - No clipboard persistence is performed on relay or clients in this MVP.
+
+### Quick Start (Cloud)
+
+If you are using the hosted relay at `relay.swatto.co.uk`:
+
+```powershell
+cargo run -p cliprelay-client -- --server-url wss://relay.swatto.co.uk/ws --room-code my-room --device-name MyPC
+```
+
+Run a second client with the same `--room-code`.
+
+Full walkthrough (architecture + user guide + cloud ops/Caddy/systemd): `docs/HOW_IT_WORKS.md`.
+
+### Linux (systemd) Auto-start
+
+This repo includes a `systemd` unit + installer script for cloud VMs:
+
+```bash
+sudo ./deploy/install-relay-systemd.sh --binary ./cliprelay-relay --bind-address 127.0.0.1:8080
+```
+
+This enables the service at boot (`systemctl enable --now cliprelay-relay.service`).
+
+## What The Relay Does (And Doesn’t)
+
+- The relay only **forwards** WebSocket messages between currently-connected clients in the same room.
+- Clipboard payloads are **end-to-end encrypted**; the relay cannot decrypt them.
+- The relay does **not** store clipboard history and does **not** persist messages across restarts.
