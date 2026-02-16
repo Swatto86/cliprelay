@@ -9,19 +9,9 @@ permissions:
   contents: write
 
 jobs:
-  build-binaries:
-    name: Build relay binary (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact_name: cliprelay-relay-linux-x64
-            binary_path: target/release/cliprelay-relay
-          - os: windows-latest
-            artifact_name: cliprelay-relay-windows-x64
-            binary_path: target/release/cliprelay-relay.exe
+  build-relay:
+    name: Build relay binary (Linux)
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -30,22 +20,45 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Run release validation
+      - name: Run relay tests
         run: cargo test -p cliprelay-relay --test e2e_relay
 
-      - name: Build release binary
+      - name: Build relay release binary
         run: cargo build --release -p cliprelay-relay
 
-      - name: Upload binary artifact
+      - name: Upload relay artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.binary_path }}
+          name: cliprelay-relay-linux-x64
+          path: target/release/cliprelay-relay
+
+  build-client:
+    name: Build client binary (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run client tests
+        run: cargo test -p cliprelay-client
+
+      - name: Build client release binary
+        run: cargo build --release -p cliprelay-client
+
+      - name: Upload client artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cliprelay-client-windows-x64
+          path: target/release/cliprelay-client.exe
 
   publish-release:
     name: Publish GitHub release
     runs-on: ubuntu-latest
-    needs: build-binaries
+    needs: [build-relay, build-client]
 
     steps:
       - name: Download release artifacts
@@ -58,4 +71,4 @@ jobs:
         with:
           files: |
             release-artifacts/cliprelay-relay-linux-x64/cliprelay-relay
-            release-artifacts/cliprelay-relay-windows-x64/cliprelay-relay.exe
+            release-artifacts/cliprelay-client-windows-x64/cliprelay-client.exe
