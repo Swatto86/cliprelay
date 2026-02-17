@@ -296,10 +296,17 @@ mod windows_client {
         /// Create the system tray icon and register OS-level event handlers.
         ///
         /// `quit_flag` is set `true` when the user clicks "Quit" in the tray
-        /// context menu.  `toggle_flag` is set `true` on a left-click or
-        /// double-click of the tray icon itself.  Both handlers call
-        /// `ctx.request_repaint()` to wake the eframe event loop even when the
-        /// window is hidden (which suppresses normal repaint timers).
+        /// context menu (shown on right-click).  `toggle_flag` is set `true`
+        /// on a left-click (button-up) or double-click of the tray icon
+        /// itself.  Both handlers call `ctx.request_repaint()` to wake the
+        /// eframe event loop even when the window is hidden (which suppresses
+        /// normal repaint timers).
+        ///
+        /// `menu_on_left_click` is explicitly set to `false` so that the
+        /// context menu is only shown on right-click (standard Windows
+        /// behaviour).  The tray-icon crate defaults to `true`, which causes
+        /// `TrackPopupMenu` to fire on every left-click — blocking the event
+        /// loop and preventing the toggle handler from working.
         fn new(
             ctx: &egui::Context,
             quit_flag: Arc<AtomicBool>,
@@ -320,6 +327,7 @@ mod windows_client {
 
             let tray_icon = TrayIconBuilder::new()
                 .with_menu(Box::new(menu))
+                .with_menu_on_left_click(false)
                 .with_icon(icon_amber.clone())
                 .with_tooltip("ClipRelay | connecting")
                 .build()
@@ -337,12 +345,20 @@ mod windows_client {
 
             let ctx_tray = ctx.clone();
             TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
+                // Only respond to left-button Up and DoubleClick events.
+                // Ignoring Down events prevents double-toggling when the
+                // Down and Up messages are dispatched in separate event-loop
+                // pump cycles.
                 let should_toggle = matches!(
                     &event,
                     TrayIconEvent::Click {
                         button: tray_icon::MouseButton::Left,
+                        button_state: tray_icon::MouseButtonState::Up,
                         ..
-                    } | TrayIconEvent::DoubleClick { .. }
+                    } | TrayIconEvent::DoubleClick {
+                        button: tray_icon::MouseButton::Left,
+                        ..
+                    }
                 );
                 if should_toggle {
                     toggle_flag.store(true, Ordering::SeqCst);
@@ -524,12 +540,26 @@ mod windows_client {
             // ── Global hotkey registration ──────────────────────────────────
             let manager = GlobalHotKeyManager::new().ok();
             let mut hotkey_current = None;
+            let mut hotkey_error: Option<String> = None;
+            if manager.is_none() {
+                warn!("GlobalHotKeyManager::new() failed — hotkeys will be unavailable");
+                hotkey_error = Some("Global hotkey system unavailable".to_owned());
+            }
             if let (Some(mgr), Some(hk)) =
                 (&manager, parse_hotkey_label(&self.hotkey_label))
             {
                 match mgr.register(hk) {
-                    Ok(()) => hotkey_current = Some(hk),
-                    Err(err) => warn!("global hotkey register failed: {err}"),
+                    Ok(()) => {
+                        info!(hotkey = %self.hotkey_label, "global hotkey registered");
+                        hotkey_current = Some(hk);
+                    }
+                    Err(err) => {
+                        warn!(hotkey = %self.hotkey_label, "global hotkey register failed: {err}");
+                        hotkey_error = Some(format!(
+                            "Global hotkey '{}' registration failed (may conflict with another app): {err}",
+                            self.hotkey_label
+                        ));
+                    }
                 }
             }
             self.hotkey_manager = manager;
@@ -557,7 +587,7 @@ mod windows_client {
                 autostart_enabled,
                 last_sent_time: None,
                 last_received_time: None,
-                last_error: None,
+                last_error: hotkey_error,
                 history,
                 tray,
                 window_visible: !self.args.background,
@@ -1067,9 +1097,21 @@ mod windows_client {
                     (parse_hotkey_label(hotkey_label), &self.hotkey_manager)
                 {
                     match mgr.register(new_hk) {
-                        Ok(()) => self.hotkey_current = Some(new_hk),
-                        Err(err) => warn!("hotkey register failed: {err}"),
+                        Ok(()) => {
+                            self.hotkey_current = Some(new_hk);
+                            *last_error = None;
+                        }
+                        Err(err) => {
+                            warn!("hotkey register failed: {err}");
+                            *last_error = Some(format!(
+                                "Hotkey '{hotkey_label}' registration failed \
+                                 (may conflict with another app): {err}"
+                            ));
+                        }
                     }
+                } else {
+                    // "Disabled" selected or manager unavailable — clear error.
+                    *last_error = None;
                 }
                 // Persist the new setting.
                 self.ui_state.hotkey = Some(hotkey_label.clone());
