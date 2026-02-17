@@ -520,8 +520,8 @@ mod windows_client {
         }
 
         fn capture_window_placement(window: &nwg::Window) -> WindowPlacement {
-            let (x, y) = window.position();
-            let (w, h) = window.size();
+            let (x, y) = logical_window_position(window);
+            let (w, h) = logical_window_size(window);
             WindowPlacement { x, y, w, h }
         }
 
@@ -603,7 +603,7 @@ mod windows_client {
         }
 
         fn layout_send_window(&self) {
-            let (w, h) = self.send_window.size();
+            let (w, h) = logical_window_size(&self.send_window);
             let w = w as i32;
             let h = h as i32;
 
@@ -633,7 +633,7 @@ mod windows_client {
         }
 
         fn layout_options_window(&self) {
-            let (w, h) = self.options_window.size();
+            let (w, h) = logical_window_size(&self.options_window);
             let w = w as i32;
             let h = h as i32;
 
@@ -693,7 +693,7 @@ mod windows_client {
         }
 
         fn layout_popup_window(&self) {
-            let (w, h) = self.popup_window.size();
+            let (w, h) = logical_window_size(&self.popup_window);
             let w = w as i32;
             let h = h as i32;
 
@@ -2397,7 +2397,7 @@ mod windows_client {
         /// controls relative to the current window size so the dialog looks
         /// correct at any resolution / DPI and adapts when resized.
         fn layout_choice(ui: &ChoiceUi) {
-            let (w, h) = ui.window.size();
+            let (w, h) = logical_window_size(&ui.window);
             let w = w as i32;
             let h = h as i32;
             let margin = scale_px(16);
@@ -2643,7 +2643,7 @@ mod windows_client {
         // Dynamic layout function: positions controls relative to the current
         // window size so the dialog looks correct at any resolution/DPI.
         fn layout_setup(ui: &SetupUi) {
-            let (w, h) = ui.window.size();
+            let (w, h) = logical_window_size(&ui.window);
             let w = w as i32;
             let h = h as i32;
             let margin = scale_px(16);
@@ -3024,6 +3024,38 @@ mod windows_client {
             (rect[2] as f64 / factor).round() as i32,
             (rect[3] as f64 / factor).round() as i32,
         ]
+    }
+
+    /// Convert the **physical-pixel** size returned by `nwg::Window::size()`
+    /// to **logical** pixels that `set_position()`/`set_size()` expect.
+    ///
+    /// NWG getters (`size()`, `position()`) return physical pixels from
+    /// `GetWindowRect`, but the setters convert logical → physical internally.
+    /// Feeding physical values straight back causes double-scaling on high-DPI.
+    fn logical_window_size(window: &nwg::Window) -> (u32, u32) {
+        let (w, h) = window.size();
+        let factor = nwg::scale_factor();
+        if factor <= 0.0 || (factor - 1.0).abs() < f64::EPSILON {
+            return (w, h);
+        }
+        (
+            (w as f64 / factor).round() as u32,
+            (h as f64 / factor).round() as u32,
+        )
+    }
+
+    /// Convert the **physical-pixel** position returned by
+    /// `nwg::Window::position()` to **logical** coordinates.
+    fn logical_window_position(window: &nwg::Window) -> (i32, i32) {
+        let (x, y) = window.position();
+        let factor = nwg::scale_factor();
+        if factor <= 0.0 || (factor - 1.0).abs() < f64::EPSILON {
+            return (x, y);
+        }
+        (
+            (x as f64 / factor).round() as i32,
+            (y as f64 / factor).round() as i32,
+        )
     }
 
     /// Logical (DPI-adjusted) dimensions of the primary monitor.
