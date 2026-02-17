@@ -1133,6 +1133,15 @@ mod windows_client {
                             "Failed to register global hotkey {} (another app may hold it)",
                             preset.label
                         );
+                        // Notify user visibly — the log alone is not enough.
+                        app_ref.show_tray_info(
+                            "ClipRelay — Hotkey Error",
+                            &format!(
+                                "Failed to register {} — another application may already be using this key combination. \
+                                 Change the hotkey in Options (right-click tray icon).",
+                                preset.label
+                            ),
+                        );
                     } else {
                         info!("Registered global hotkey {}", preset.label);
                     }
@@ -1299,15 +1308,26 @@ mod windows_client {
                     if let Some(idx) = self.options_hotkey_combo.selection()
                         && let Some(preset) = HOTKEY_PRESETS.get(idx)
                     {
-                        self.re_register_hotkey(preset);
+                        let registered = self.re_register_hotkey(preset);
                         self.ui_state.hotkey = Some(preset.label.to_owned());
                         self.maybe_save_ui_state();
                         if preset.vk != 0 {
-                            self.show_tray_info(
-                                "ClipRelay",
-                                &format!("Hotkey changed to {}", preset.label),
-                            );
+                            if registered {
+                                self.options_error_label.set_text("");
+                                self.show_tray_info(
+                                    "ClipRelay",
+                                    &format!("Hotkey changed to {}", preset.label),
+                                );
+                            } else {
+                                let msg = format!(
+                                    "Failed to register {} — another application may already be using this key combination. Choose a different hotkey.",
+                                    preset.label
+                                );
+                                self.options_error_label.set_text(&msg);
+                                self.show_tray_info("ClipRelay — Hotkey Error", &msg);
+                            }
                         } else {
+                            self.options_error_label.set_text("");
                             self.show_tray_info("ClipRelay", "Global hotkey disabled");
                         }
                     }
@@ -1589,7 +1609,11 @@ mod windows_client {
         /// Unregister the current global hotkey (if any) and register a new
         /// one matching `preset`.  If the preset is "None" (vk == 0) the
         /// hotkey is simply disabled.
-        fn re_register_hotkey(&self, preset: &HotkeyPreset) {
+        ///
+        /// Returns `true` if the hotkey was successfully registered (or
+        /// disabled), `false` if registration failed (e.g. another app
+        /// already holds the key combination).
+        fn re_register_hotkey(&self, preset: &HotkeyPreset) -> bool {
             if let Some(hwnd) = self.app_window.handle.hwnd() {
                 let hwnd = hwnd as isize;
                 // Always unregister first — safe even if none was registered.
@@ -1610,12 +1634,16 @@ mod windows_client {
                             "Failed to register hotkey {} (another app may hold it)",
                             preset.label
                         );
+                        return false;
                     } else {
                         info!("Registered global hotkey {}", preset.label);
                     }
                 } else {
                     info!("Global hotkey disabled");
                 }
+                true
+            } else {
+                false
             }
         }
 
