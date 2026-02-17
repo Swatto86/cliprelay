@@ -1,49 +1,34 @@
-#[cfg(target_os = "windows")]
-use native_windows_gui as nwg;
-
-/// UI sizing (unscaled base pixels).
+/// UI sizing constants for the ClipRelay client.
 ///
-/// These are intentionally a bit larger than the original defaults so the UI remains usable on
-/// typical 1080p/1440p displays.
-pub const OPTIONS_DEFAULT_W_PX: i32 = 680;
-pub const OPTIONS_DEFAULT_H_PX: i32 = 560;
-pub const OPTIONS_MIN_W_PX: i32 = 560;
-pub const OPTIONS_MIN_H_PX: i32 = 460;
+/// With egui, DPI scaling is handled automatically. These constants define
+/// logical pixel sizes used for window defaults.
 
-pub const CHOOSE_ROOM_DEFAULT_W_PX: i32 = 620;
-pub const CHOOSE_ROOM_HAS_SAVED_H_PX: i32 = 320;
-pub const CHOOSE_ROOM_NO_SAVED_H_PX: i32 = 230;
+/// Default options window width (logical pixels).
+pub const OPTIONS_DEFAULT_W_PX: f32 = 680.0;
+/// Default options window height (logical pixels).
+pub const OPTIONS_DEFAULT_H_PX: f32 = 560.0;
+/// Minimum options window width (logical pixels).
+pub const OPTIONS_MIN_W_PX: f32 = 560.0;
+/// Minimum options window height (logical pixels).
+pub const OPTIONS_MIN_H_PX: f32 = 460.0;
 
-pub fn options_info_box_flags() -> nwg::TextBoxFlags {
-    // The options text includes many lines (including history). We need a vertical scrollbar so
-    // users can read it on smaller windows.
-    //
-    // Note: `nwg::TextBox` is multiline by default (forced ES_MULTILINE).
-    nwg::TextBoxFlags::VISIBLE
-        | nwg::TextBoxFlags::TAB_STOP
-        | nwg::TextBoxFlags::VSCROLL
-        | nwg::TextBoxFlags::AUTOVSCROLL
-}
+/// Default choose-room dialog width.
+pub const CHOOSE_ROOM_DEFAULT_W_PX: f32 = 620.0;
+/// Choose-room dialog height when a saved config exists.
+pub const CHOOSE_ROOM_HAS_SAVED_H_PX: f32 = 320.0;
+/// Choose-room dialog height when no saved config exists.
+pub const CHOOSE_ROOM_NO_SAVED_H_PX: f32 = 230.0;
 
-#[cfg(all(test, target_os = "windows"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn options_info_box_is_scrollable() {
-        let flags = options_info_box_flags();
-        assert!(
-            flags.contains(nwg::TextBoxFlags::VSCROLL),
-            "options info box must have a vertical scrollbar"
-        );
-    }
-
-    #[test]
     fn ui_size_constants_are_reasonable() {
-        assert!(OPTIONS_DEFAULT_W_PX >= 600);
-        assert!(OPTIONS_DEFAULT_H_PX >= 460);
-        assert!(OPTIONS_MIN_W_PX >= 480);
-        assert!(OPTIONS_MIN_H_PX >= 360);
-        assert!(CHOOSE_ROOM_DEFAULT_W_PX >= 520);
+        assert!(OPTIONS_DEFAULT_W_PX >= 600.0);
+        assert!(OPTIONS_DEFAULT_H_PX >= 460.0);
+        assert!(OPTIONS_MIN_W_PX >= 480.0);
+        assert!(OPTIONS_MIN_H_PX >= 360.0);
+        assert!(CHOOSE_ROOM_DEFAULT_W_PX >= 520.0);
     }
 }
