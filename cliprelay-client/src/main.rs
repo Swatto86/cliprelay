@@ -1862,7 +1862,15 @@ mod windows_client {
                 return;
             }
 
+            let total = self.state.notifications.len();
+
             if let Some(notification) = self.state.notifications.first() {
+                let queue_suffix = if total > 1 {
+                    format!(" ({} pending)", total)
+                } else {
+                    String::new()
+                };
+
                 match notification {
                     Notification::Text {
                         sender_device_id,
@@ -1873,6 +1881,9 @@ mod windows_client {
                         self.popup_sender_label.set_text(&format!("From: {}", name));
                         self.popup_text_box.set_text(preview);
                         self.popup_apply_button.set_text("Apply");
+                        self.popup_window.set_text(
+                            &format!("ClipRelay - New Clipboard{}", queue_suffix),
+                        );
                     }
                     Notification::File {
                         sender_device_id,
@@ -1883,6 +1894,9 @@ mod windows_client {
                         self.popup_sender_label.set_text(&format!("From: {}", name));
                         self.popup_text_box.set_text(preview);
                         self.popup_apply_button.set_text("Save");
+                        self.popup_window.set_text(
+                            &format!("ClipRelay - New File{}", queue_suffix),
+                        );
                     }
                 }
             }
