@@ -232,13 +232,13 @@ The systemd unit includes hardening out of the box:
 ### Controls
 
 - **Double-click tray icon** — toggle the Send window (or use the configurable global hotkey)
-- **Right-click tray icon** — menu: Options, Quit
+- **Right-click tray icon** — context menu with Quit
 
 ### Options
 
 - **Auto apply** — when on, incoming clipboard text is applied automatically; when off (default), a popup lets you Apply or Dismiss
 - **Start with Windows** — adds a per-user startup entry (`--background` mode)
-- **Global hotkey** — configurable shortcut to toggle the Send window (default: Ctrl+Shift+V)
+- **Global hotkey** — configurable shortcut to toggle the Send window (default: Ctrl+Alt+C)
 
 ### Sending text
 

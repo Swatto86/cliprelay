@@ -47,7 +47,7 @@ function Get-WorkspaceRoot {
 }
 
 function Get-CurrentWorkspaceVersion([string]$CargoTomlPath) {
-    $content = Get-Content -Path $CargoTomlPath -Raw
+    $content = [System.IO.File]::ReadAllText($CargoTomlPath)
     $match = [regex]::Match($content, '(?ms)^\[workspace\.package\].*?^version\s*=\s*"(?<version>\d+\.\d+\.\d+)"')
     if (-not $match.Success) {
         throw "Could not locate [workspace.package] version in $CargoTomlPath"
@@ -66,14 +66,19 @@ function Compare-SemVer([string]$Left, [string]$Right) {
 }
 
 function Update-WorkspaceVersion([string]$CargoTomlPath, [string]$OldVersion, [string]$NewVersion) {
-    $content = Get-Content -Path $CargoTomlPath -Raw
+    $content = [System.IO.File]::ReadAllText($CargoTomlPath)
     $pattern = '(?m)^(version\s*=\s*")' + [regex]::Escape($OldVersion) + '("\s*$)'
     $replacement = '${1}' + $NewVersion + '${2}'
     $updated = $content -replace $pattern, $replacement
     if ($updated -eq $content) {
         throw "Workspace version replacement did not change $CargoTomlPath"
     }
-    Set-Content -Path $CargoTomlPath -Value $updated -Encoding UTF8 -NoNewline
+    # Normalise trailing whitespace to exactly one newline, preserving the
+    # original line-ending style (CRLF or LF) to avoid git diff noise.
+    $eol = if ($updated -match "`r`n") { "`r`n" } else { "`n" }
+    $updated = $updated.TrimEnd() + $eol
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($CargoTomlPath, $updated, $utf8NoBom)
 }
 
 function Get-RemoteHttpsUrl {
@@ -165,12 +170,12 @@ if ($isGitRepo) {
     }
 }
 
-$originalCargoToml = Get-Content -Path $cargoToml -Raw
+$originalCargoToml = [System.IO.File]::ReadAllText($cargoToml)
 $lockPath = Join-Path $workspaceRoot "Cargo.lock"
 $lockExistedBefore = Test-Path $lockPath
 $originalLock = $null
 if ($lockExistedBefore) {
-    $originalLock = Get-Content -Path $lockPath -Raw
+    $originalLock = [System.IO.File]::ReadAllText($lockPath)
 }
 
 $changedFiles = New-Object System.Collections.Generic.List[string]
@@ -322,10 +327,11 @@ catch {
     }
 
     Write-WarnLine "Rolling back version file changes"
-    Set-Content -Path $cargoToml -Value $originalCargoToml -Encoding UTF8
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($cargoToml, $originalCargoToml, $utf8NoBom)
 
     if ($lockExistedBefore) {
-        Set-Content -Path $lockPath -Value $originalLock -Encoding UTF8
+        [System.IO.File]::WriteAllText($lockPath, $originalLock, $utf8NoBom)
     } elseif (Test-Path $lockPath) {
         Remove-Item -Path $lockPath -Force
     }

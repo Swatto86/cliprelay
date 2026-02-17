@@ -12,45 +12,29 @@ When a coding session changes code, update this file in the same increment:
 3. Add one item to **Session History** with date, scope, files changed, and next actions.
 4. Keep entries concise and factual (no placeholders).
 
-## Current Status (2026-02-16)
-- Workspace is now configured as a single root git repository (`cliprelay/.git`) instead of three nested crate repositories.
-- Root `.gitignore` is hardened for Rust workspace artifacts, common logs/temp files, and editor/OS noise.
-- MVP workspace implemented with three crates:
-  - `cliprelay-core`: protocol, framing, crypto, replay protection, validation, required unit tests.
-  - `cliprelay-relay`: websocket relay server with room/presence management, limits, and forwarding only opaque ciphertext.
-  - `cliprelay-client`: native-windows-gui desktop client (WinAPI-native) with async clipboard/network tasks and in-window apply/dismiss flow.
-- DevWorkflow artifacts are present:
-  - `DEVWORKFLOW_CHECKLIST.md`
-  - `PROJECT_ATLAS.md`
-- Relay E2E harness is implemented and passing with expanded negative-path coverage for invalid first frame rejection, sender identity mismatch drop, malformed frame drop, and unexpected post-hello control handling.
-- CI workflow is implemented at `.github/workflows/ci.yml` and runs `cargo check`, core tests, and relay E2E tests.
-- Release automation is implemented with `update-application.ps1` and `.github/workflows/release.yml` for tag-driven binary publishing, including `-DryRun` preview support.
+## Current Status (2026-02-17)
+- Version: **1.0.8** (tagged v1.0.8, pushed to origin).
+- Workspace is a single root git repository (`cliprelay/.git`).
+- Three crates:
+  - `cliprelay-core`: protocol, framing, crypto, replay protection, validation, unit tests.
+  - `cliprelay-relay`: WebSocket relay server with room/presence management, limits, forwarding opaque ciphertext.
+  - `cliprelay-client`: eframe/egui tray-first Windows client with tabbed UI (Send | Options | Notifications), global hotkey (Ctrl+Alt+C), file transfer, and direct Win32 `ShowWindow`/`SetForegroundWindow` for tray/hotkey toggle (bypasses dormant eframe event loop).
+- CI: `.github/workflows/ci.yml` runs `cargo check` + tests.
+- Release: `update-application.ps1` + `.github/workflows/release.yml` for tag-driven binary publishing.
+- All 17 workspace tests pass.
 
 ## Validation Evidence (latest)
-- `Get-ChildItem -Path . -Force -Recurse -Directory -Filter .git | Select-Object -ExpandProperty FullName` → success (`C:\Users\Swatto\cliprelay\.git` only)
-- `git status --short` → success (root repo active; workspace files visible as untracked for initial commit)
-- `cargo check` → success
-- `cargo test -p cliprelay-core` → success (`4 passed`, `0 failed`)
-- `cargo test -p cliprelay-relay --test e2e_relay` → success (`7 passed`, `0 failed`)
-- `pwsh` parser check for `update-application.ps1` → success (`PowerShell syntax OK`)
-- `pwsh -NoProfile -ExecutionPolicy Bypass -File .\update-application.ps1 -Version 0.1.1 -Notes "Dry-run validation" -DryRun` → success (`Dry-run completed`)
-- `cargo check -p cliprelay-client` → success (native-windows-gui client compiles)
-- `cargo check` → success (workspace compiles after UI migration)
-- `cargo run -p cliprelay-client -- --server-url ws://127.0.0.1:8080/ws --room-code sanity-room --device-name SanityCheck` → launch succeeds after callback borrow fix (terminated manually after sanity check)
-- `cargo check -p cliprelay-client` → success after tray-first/DPI-aware refactor
-- `cargo run -p cliprelay-client -- --server-url ws://127.0.0.1:8080/ws --room-code tray-room --device-name TrayTest` → process remains running in tray (`Get-Process` verified), terminated after sanity check
-- `cargo check -p cliprelay-client` → success after status-indicator tray model update
-- `cargo run -p cliprelay-client -- --server-url ws://127.0.0.1:8080/ws --room-code tray-model --device-name TrayUX` → process remains running in tray (`Get-Process` verified), terminated after sanity check
+- `cargo test --workspace` → 17 passed, 0 failed (core: 4, client lib: 3, client ui_state: 2, client manifest: 1, relay e2e: 7).
+- `cargo build -p cliprelay-client` → success (0 warnings).
+- `update-application.ps1` → v1.0.8 released, tag pushed, CI triggered.
 
 ## Open Risks / Gaps
-- Transport security in local examples uses `ws://`; production deployment requires TLS termination and `wss://`.
 - Client-side end-to-end GUI automation tests are not yet implemented.
 - Release script behavior involving remote tag/release deletion depends on remote access and optional GitHub CLI (`gh`) availability.
-- Previous nested repository metadata was moved to `.git-backups-2026-02-16/` and should be retained or archived intentionally.
 
 ## Suggested Next Steps
-1. Add `README` section with full `update-application.ps1` examples (interactive, parameter mode, force mode).
-2. Extend release workflow to include signed checksums for published binaries.
+1. Extend release workflow to include signed checksums for published binaries.
+2. Remove debug `eprintln!` / `AllocConsole` tracing from client once tray/hotkey behavior is confirmed stable.
 3. Add optional release workflow artifact for `cliprelay-client` once release packaging strategy is finalized.
 
 ## Session History
@@ -121,3 +105,22 @@ When a coding session changes code, update this file in the same increment:
 - Updated tray context menu to requested minimal actions: `Options` and `Quit`.
 - Added left-click tray behavior to open a compact send UI for manual clipboard send to connected peers.
 - Kept notification popup flow for incoming clipboard events and options window for auto-apply toggle.
+
+### 2026-02-17 — Tray/hotkey fix: direct Win32 show/hide bypass
+- Root cause: eframe/winit does not call `update()` for invisible windows; `request_repaint()` has no effect when window is hidden. The flag-based approach (set `AtomicBool` → eframe processes in `update()`) was fundamentally broken.
+- Added `Win32_UI_WindowsAndMessaging` feature to `windows-sys` in Cargo.toml.
+- Added `to_wide_null()` and `win32_set_window_visible()` helpers for direct `ShowWindow`/`SetForegroundWindow` via Win32 API.
+- Added `shared_visible: Arc<AtomicBool>` as authoritative visibility state mutated by OS callbacks.
+- In `start_running()`: find eframe HWND via `FindWindowW("ClipRelay")`, pass to tray and hotkey callbacks.
+- Tray toggle and hotkey callbacks now call `ShowWindow`/`SetForegroundWindow` directly, bypassing the dormant event loop.
+- Close-to-hide handler updates `shared_visible`; `update()` loop syncs local `window_visible` from shared atomic.
+- Fixed `menu_on_left_click(false)` to restore right-click context menu.
+- Filtered Click to `MouseButtonState::Up`, DoubleClick to Left button, hotkey to `Pressed` only — preventing double-toggle.
+- Added quit fallback thread (force-exit after 500 ms).
+- All 17 workspace tests pass.
+
+### 2026-02-17 — Release script encoding fix + docs update
+- Fixed `update-application.ps1`: replaced all `Get-Content -Raw` / `Set-Content -Encoding UTF8` with `[System.IO.File]::ReadAllText()` / `WriteAllText()` using `UTF8Encoding($false)` (no BOM).
+- Added trailing-whitespace normalisation in `Update-WorkspaceVersion` to prevent accumulating blank lines at EOF.
+- Cleaned existing Cargo.toml (had 8 trailing blank lines from previous runs).
+- Updated all documentation (PROJECT_ATLAS.md, README.md, FEATURE_SUMMARY.md, HOW_IT_WORKS.md, AI_PROGRESS.md) to reflect current v1.0.8 state, Win32 tray/hotkey architecture, and corrected hotkey default (Ctrl+Alt+C not Ctrl+Shift+V).

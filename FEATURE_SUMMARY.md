@@ -98,6 +98,13 @@ When you launch the Windows client **without** a `--room-code` CLI argument, you
 - 🟡 **Amber**: Connected, but no room key yet (usually only device in room)
 - 🟢 **Green**: Connected and room key ready (encryption working)
 
+### Tray & Hotkey Controls ✅
+- **Left-click / double-click** tray icon toggles window visibility
+- **Right-click** tray icon shows Quit context menu
+- **Global hotkey** (default Ctrl+Alt+C, configurable in Options tab) toggles window visibility
+- All toggle/quit actions use **direct Win32 API** (`ShowWindow`/`SetForegroundWindow` via `FindWindowW`) to bypass the eframe event loop which is dormant when the window is hidden
+- Quit has a 500 ms fallback `process::exit` in case the event loop doesn't respond
+
 ### Button States
 - **"Send File..." button**: Enabled only when green (room key ready)
 - Prevents sending when not connected or encryption not available
@@ -137,5 +144,5 @@ Potential improvements (not implemented):
 
 ---
 
-*Last Updated: 2026-02-16*  
-*Commit: 7d17fb5 - feat(client): add room choice dialog on every launch*
+*Last Updated: 2026-02-17*  
+*Version: 1.0.8*
