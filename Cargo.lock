@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "cliprelay-client"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "arboard",
  "base64",
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "cliprelay-core"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -355,7 +355,7 @@ dependencies = [
 
 [[package]]
 name = "cliprelay-relay"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "axum",
  "clap",
