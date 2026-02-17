@@ -22,7 +22,7 @@ ClipRelay synchronizes clipboard text across online devices in a shared room usi
 - `cliprelay-client/src/main.rs`: native-windows-gui tray-first app (WinAPI-native, DPI-aware) with status-indicator tray icons, left-click open send UI, and right-click options/quit menu. Contains reconnection loop, WebSocket keepalive pings, and dynamic dialog layout.
 - `cliprelay-client/src/ui_layout.rs`: UI sizing constants.
 - `cliprelay-client/src/ui_state.rs`: UI window placement persistence (load/save with size bounds, clamping helper).
-- `cliprelay-client/assets/app.manifest`: Windows manifest with per-monitor DPI awareness and common-controls v6.
+- `cliprelay-client/assets/app.manifest`: Windows manifest with per-monitor DPI awareness (PerMonitorV2) and common-controls v6.
 - `cliprelay-client/assets/app-icon-circle-c.ico`: client icon used for tray + executable resources.
 - `cliprelay-client/build.rs`: Windows resource embedding (icon via winres, manifest via MSVC linker) ensuring taskbar icon and Common Controls v6 support.
 - `cliprelay-client/tests/ui_state.rs`: regression tests for window placement persistence helpers.
@@ -70,3 +70,4 @@ Modal dialogs (Setup, Choose Room) use inner layout functions (`layout_setup`, `
 - Frame size must not exceed `MAX_RELAY_MESSAGE_BYTES`.
 - Replay counters are monotonic per sender on receiving client.
 - WebSocket sessions must send keepalive pings to survive reverse-proxy idle timeouts.
+- Window coordinates (position/size) stored in `WindowPlacement` are in NWG **logical** pixels (i.e. the coordinate space of `window.position()`/`window.size()`). `nwg::Monitor` APIs return **physical** pixels and must be converted via `physical_to_logical_rect()` / `logical_primary_size()` before use with `set_position`/`set_size`. Using `scale_px()` with NWG setters causes double-scaling on high-DPI displays.

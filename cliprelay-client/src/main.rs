@@ -473,13 +473,17 @@ mod windows_client {
             out
         }
 
+        /// Clamp a placement into a **logical** monitor rect.
+        ///
+        /// The margin (16 px) is in logical coordinates — no `scale_px`
+        /// needed because `set_position`/`set_size` handle DPI internally.
         fn clamp_placement_in_rect(
             placement: WindowPlacement,
             min_w: u32,
             min_h: u32,
             rect: [i32; 4],
         ) -> WindowPlacement {
-            ui_state::clamp_placement_in_rect(placement, min_w, min_h, scale_px(16), rect)
+            ui_state::clamp_placement_in_rect(placement, min_w, min_h, 16, rect)
         }
 
         fn clamp_placement_for_window(
@@ -489,7 +493,12 @@ mod windows_client {
             min_w: u32,
             min_h: u32,
         ) -> WindowPlacement {
-            let rect = nwg::Monitor::monitor_rect_from_window(window);
+            // Convert physical monitor rect to logical so it matches
+            // the coordinate space of WindowPlacement (set/get_position
+            // are logical).
+            let rect = physical_to_logical_rect(
+                nwg::Monitor::monitor_rect_from_window(window),
+            );
             Self::clamp_placement_in_rect(placement, min_w, min_h, rect)
         }
 
@@ -533,47 +542,63 @@ mod windows_client {
         }
 
         fn restore_send_window_placement(&self) {
-            let min_w = scale_px(420) as u32;
-            let min_h = scale_px(320) as u32;
-            let default_w = scale_px(480) as u32;
-            let default_h = scale_px(360) as u32;
+            // All values are in **logical** pixels — NWG handles DPI
+            // scaling internally in set_position / set_size.
+            let min_w = 420_u32;
+            let min_h = 320_u32;
+            let default_w = 480_u32;
+            let default_h = 360_u32;
 
-            // Use saved size if available, but always center on screen.
-            let w = self.ui_state.send.map_or(default_w, |p| p.w);
-            let h = self.ui_state.send.map_or(default_h, |p| p.h);
-            let x = (nwg::Monitor::width() - w as i32) / 2;
-            let y = (nwg::Monitor::height() - h as i32) / 2;
-            let placement = WindowPlacement { x, y, w, h };
+            let placement = if let Some(saved) = self.ui_state.send {
+                // Restore the exact saved position and size.
+                saved
+            } else {
+                // First open — center on the primary monitor.
+                let (sw, sh) = logical_primary_size();
+                let w = default_w.min((sw - 40).max(200) as u32);
+                let h = default_h.min((sh - 40).max(200) as u32);
+                let x = (sw - w as i32) / 2;
+                let y = (sh - h as i32) / 2;
+                WindowPlacement { x, y, w, h }
+            };
             self.apply_restored_placement(&self.send_window, placement, min_w, min_h);
         }
 
         fn restore_options_window_placement(&self) {
-            let min_w = scale_px(ui_layout::OPTIONS_MIN_W_PX) as u32;
-            let min_h = scale_px(ui_layout::OPTIONS_MIN_H_PX) as u32;
-            let default_w = scale_px(ui_layout::OPTIONS_DEFAULT_W_PX) as u32;
-            let default_h = scale_px(ui_layout::OPTIONS_DEFAULT_H_PX) as u32;
+            let min_w = ui_layout::OPTIONS_MIN_W_PX as u32;
+            let min_h = ui_layout::OPTIONS_MIN_H_PX as u32;
+            let default_w = ui_layout::OPTIONS_DEFAULT_W_PX as u32;
+            let default_h = ui_layout::OPTIONS_DEFAULT_H_PX as u32;
 
-            // Use saved size if available, but always center on screen.
-            let w = self.ui_state.options.map_or(default_w, |p| p.w);
-            let h = self.ui_state.options.map_or(default_h, |p| p.h);
-            let x = (nwg::Monitor::width() - w as i32) / 2;
-            let y = (nwg::Monitor::height() - h as i32) / 2;
-            let placement = WindowPlacement { x, y, w, h };
+            let placement = if let Some(saved) = self.ui_state.options {
+                saved
+            } else {
+                let (sw, sh) = logical_primary_size();
+                let w = default_w.min((sw - 40).max(200) as u32);
+                let h = default_h.min((sh - 40).max(200) as u32);
+                let x = (sw - w as i32) / 2;
+                let y = (sh - h as i32) / 2;
+                WindowPlacement { x, y, w, h }
+            };
             self.apply_restored_placement(&self.options_window, placement, min_w, min_h);
         }
 
         fn restore_popup_window_placement(&self) {
-            let min_w = scale_px(420) as u32;
-            let min_h = scale_px(240) as u32;
-            let default_w = scale_px(480) as u32;
-            let default_h = scale_px(280) as u32;
+            let min_w = 420_u32;
+            let min_h = 240_u32;
+            let default_w = 480_u32;
+            let default_h = 280_u32;
 
-            // Use saved size if available, but always center on screen.
-            let w = self.ui_state.popup.map_or(default_w, |p| p.w);
-            let h = self.ui_state.popup.map_or(default_h, |p| p.h);
-            let x = (nwg::Monitor::width() - w as i32) / 2;
-            let y = (nwg::Monitor::height() - h as i32) / 2;
-            let placement = WindowPlacement { x, y, w, h };
+            let placement = if let Some(saved) = self.ui_state.popup {
+                saved
+            } else {
+                let (sw, sh) = logical_primary_size();
+                let w = default_w.min((sw - 40).max(200) as u32);
+                let h = default_h.min((sh - 40).max(200) as u32);
+                let x = (sw - w as i32) / 2;
+                let y = (sh - h as i32) / 2;
+                WindowPlacement { x, y, w, h }
+            };
             self.apply_restored_placement(&self.popup_window, placement, min_w, min_h);
         }
 
@@ -794,10 +819,13 @@ mod windows_client {
                 .build(&mut tray_quit_item)
                 .map_err(|err| err.to_string())?;
 
-            let send_width = scale_px(480).min(nwg::Monitor::width() - scale_px(40));
-            let send_height = scale_px(360).min(nwg::Monitor::height() - scale_px(40));
-            let send_x = (nwg::Monitor::width() - send_width) / 2;
-            let send_y = (nwg::Monitor::height() - send_height) / 2;
+            // Initial window geometry in **logical** pixels — the builder
+            // converts to physical internally via logical_to_physical.
+            let (scr_w, scr_h) = logical_primary_size();
+            let send_width = 480.min(scr_w - 40);
+            let send_height = 360.min(scr_h - 40);
+            let send_x = (scr_w - send_width) / 2;
+            let send_y = (scr_h - send_height) / 2;
 
             nwg::Window::builder()
                 .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE)
@@ -847,12 +875,13 @@ mod windows_client {
                 .build(&mut send_file_button)
                 .map_err(|err| err.to_string())?;
 
+            let (scr_w, scr_h) = logical_primary_size();
             let options_width =
-                scale_px(ui_layout::OPTIONS_DEFAULT_W_PX).min(nwg::Monitor::width() - scale_px(40));
-            let options_height = scale_px(ui_layout::OPTIONS_DEFAULT_H_PX)
-                .min(nwg::Monitor::height() - scale_px(40));
-            let options_x = (nwg::Monitor::width() - options_width) / 2;
-            let options_y = (nwg::Monitor::height() - options_height) / 2;
+                ui_layout::OPTIONS_DEFAULT_W_PX.min(scr_w - 40);
+            let options_height =
+                ui_layout::OPTIONS_DEFAULT_H_PX.min(scr_h - 40);
+            let options_x = (scr_w - options_width) / 2;
+            let options_y = (scr_h - options_height) / 2;
 
             nwg::Window::builder()
                 .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE)
@@ -924,10 +953,11 @@ mod windows_client {
                 .build(&mut options_close_button)
                 .map_err(|err| err.to_string())?;
 
-            let popup_width = scale_px(480).min(nwg::Monitor::width() - scale_px(40));
-            let popup_height = scale_px(280).min(nwg::Monitor::height() - scale_px(40));
-            let popup_x = (nwg::Monitor::width() - popup_width) / 2;
-            let popup_y = (nwg::Monitor::height() - popup_height) / 2;
+            let (scr_w, scr_h) = logical_primary_size();
+            let popup_width = 480.min(scr_w - 40);
+            let popup_height = 280.min(scr_h - 40);
+            let popup_x = (scr_w - popup_width) / 2;
+            let popup_y = (scr_h - popup_height) / 2;
 
             nwg::Window::builder()
                 .flags(nwg::WindowFlags::WINDOW | nwg::WindowFlags::VISIBLE)
@@ -2248,17 +2278,17 @@ mod windows_client {
         let mut button_cancel = nwg::Button::default();
 
         let has_saved = saved_config.is_some();
-        let width = scale_px(ui_layout::CHOOSE_ROOM_DEFAULT_W_PX);
+        // Dialog dimensions in **logical** pixels — the NWG builder and
+        // set_size/set_position handle DPI scaling internally.
+        let width = ui_layout::CHOOSE_ROOM_DEFAULT_W_PX;
         let height = if has_saved {
-            scale_px(ui_layout::CHOOSE_ROOM_HAS_SAVED_H_PX)
+            ui_layout::CHOOSE_ROOM_HAS_SAVED_H_PX
         } else {
-            scale_px(ui_layout::CHOOSE_ROOM_NO_SAVED_H_PX)
+            ui_layout::CHOOSE_ROOM_NO_SAVED_H_PX
         };
-        // Clamp to screen bounds so the dialog is usable on low-res screens.
-        let screen_w = nwg::Monitor::width();
-        let screen_h = nwg::Monitor::height();
-        let width = width.min(screen_w - scale_px(40));
-        let height = height.min(screen_h - scale_px(40));
+        let (screen_w, screen_h) = logical_primary_size();
+        let width = width.min(screen_w - 40);
+        let height = height.min(screen_h - 40);
         let x = (screen_w - width) / 2;
         let y = (screen_h - height) / 2;
 
@@ -2408,8 +2438,8 @@ mod windows_client {
             }
         }
 
-        // Correct size & center on screen using set_size/set_position which
-        // bypass the DPI double-scaling the Window builder applies.
+        // Correct size & center on screen.  set_size/set_position apply
+        // logical_to_physical internally, so pass logical coordinates.
         ui.window.set_size(width as u32, height as u32);
         layout_choice(&ui);
         ui.window.set_position(x, y);
@@ -2499,13 +2529,12 @@ mod windows_client {
         let mut button_start = nwg::Button::default();
         let mut button_cancel = nwg::Button::default();
 
-        let width = scale_px(520);
-        let height = scale_px(340);
+        let width = 520;
+        let height = 340;
         // Clamp to screen bounds so the dialog is usable even at low resolutions.
-        let screen_w = nwg::Monitor::width();
-        let screen_h = nwg::Monitor::height();
-        let width = width.min(screen_w - scale_px(40));
-        let height = height.min(screen_h - scale_px(40));
+        let (screen_w, screen_h) = logical_primary_size();
+        let width = width.min(screen_w - 40);
+        let height = height.min(screen_h - 40);
         let x = (screen_w - width) / 2;
         let y = (screen_h - height) / 2;
 
@@ -2666,8 +2695,8 @@ mod windows_client {
             ui.button_cancel.set_size(btn_w as u32, btn_h as u32);
         }
 
-        // Correct size & center on screen using set_size/set_position which
-        // bypass the DPI double-scaling the Window builder applies.
+        // Correct size & center on screen.  set_size/set_position apply
+        // logical_to_physical internally, so pass logical coordinates.
         ui.window.set_size(width as u32, height as u32);
         layout_setup(&ui);
         ui.window.set_position(x, y);
@@ -2968,6 +2997,36 @@ mod windows_client {
     fn scale_px(px: i32) -> i32 {
         let scaled = (f64::from(px) * nwg::scale_factor()).round() as i32;
         scaled.max(1)
+    }
+
+    /// Convert a **physical-pixel** monitor rect (from `nwg::Monitor`) to the
+    /// **logical** coordinate space that `set_position`/`set_size` expect.
+    ///
+    /// `nwg::Monitor::width()/height()` and `monitor_rect_from_window()` return
+    /// raw physical pixels, but NWG's Window `set_position`/`set_size` apply
+    /// `logical_to_physical` internally.  Passing physical values directly
+    /// causes double-scaling on high-DPI displays (e.g. 4K @ 150 %).
+    fn physical_to_logical_rect(rect: [i32; 4]) -> [i32; 4] {
+        let factor = nwg::scale_factor();
+        if factor <= 0.0 || (factor - 1.0).abs() < f64::EPSILON {
+            return rect;
+        }
+        [
+            (rect[0] as f64 / factor).round() as i32,
+            (rect[1] as f64 / factor).round() as i32,
+            (rect[2] as f64 / factor).round() as i32,
+            (rect[3] as f64 / factor).round() as i32,
+        ]
+    }
+
+    /// Logical (DPI-adjusted) dimensions of the primary monitor.
+    ///
+    /// Use these for centering calculations when no window handle is available.
+    fn logical_primary_size() -> (i32, i32) {
+        let factor = nwg::scale_factor();
+        let w = (nwg::Monitor::width() as f64 / factor).round() as i32;
+        let h = (nwg::Monitor::height() as f64 / factor).round() as i32;
+        (w.max(200), h.max(200))
     }
 
     async fn run_client_runtime(
