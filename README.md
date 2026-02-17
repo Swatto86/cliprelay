@@ -50,7 +50,7 @@ Replay protection:
 Requirements:
 
 - Rust stable toolchain
-- Client requires Windows (native Win32 UI)
+- Client requires Windows (egui/eframe UI with Win32 tray integration)
 - Relay runs on Linux or Windows
 
 ```powershell
