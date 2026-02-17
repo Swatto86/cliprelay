@@ -47,12 +47,41 @@ mod windows_client {
     use sha2::{Digest, Sha256};
     use tokio::{runtime::Runtime, sync::mpsc, time::timeout};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
-    use tracing::{error, info, warn};
+    use tracing::{debug, error, info, warn};
     use tracing_subscriber::fmt::MakeWriter;
     use url::Url;
 
     use cliprelay_client::autostart;
     use cliprelay_client::ui_state::{self, SavedUiState};
+
+    // ─── Win32 helpers ─────────────────────────────────────────────────────────
+
+    /// Encode a `&str` as a null-terminated UTF-16 `Vec<u16>` suitable for
+    /// Win32 wide-string APIs (`FindWindowW`, etc.).
+    fn to_wide_null(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0u16)).collect()
+    }
+
+    /// Show or hide the eframe window directly through Win32, bypassing the
+    /// eframe event loop which is dormant when the window is invisible.
+    ///
+    /// # Safety
+    /// `hwnd` must be a valid window handle obtained from `FindWindowW`.
+    unsafe fn win32_set_window_visible(hwnd: isize, visible: bool) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            SetForegroundWindow, ShowWindow, SW_HIDE, SW_RESTORE,
+        };
+        if visible {
+            unsafe {
+                ShowWindow(hwnd, SW_RESTORE);
+                SetForegroundWindow(hwnd);
+            }
+        } else {
+            unsafe {
+                ShowWindow(hwnd, SW_HIDE);
+            }
+        }
+    }
 
     // ─── Embedded icon data ────────────────────────────────────────────────────
 
@@ -307,10 +336,18 @@ mod windows_client {
         /// behaviour).  The tray-icon crate defaults to `true`, which causes
         /// `TrackPopupMenu` to fire on every left-click — blocking the event
         /// loop and preventing the toggle handler from working.
+        ///
+        /// `eframe_hwnd` is the Win32 HWND of the main eframe window,
+        /// obtained via `FindWindowW`.  The toggle callback uses it to call
+        /// `ShowWindow`/`SetForegroundWindow` directly, because eframe does
+        /// **not** call `update()` (and therefore never processes toggle
+        /// flags) while the window is invisible.
         fn new(
             ctx: &egui::Context,
             quit_flag: Arc<AtomicBool>,
             toggle_flag: Arc<AtomicBool>,
+            eframe_hwnd: isize,
+            shared_visible: Arc<AtomicBool>,
         ) -> Option<Self> {
             use tray_icon::menu::{Menu, MenuEvent, MenuItem};
             use tray_icon::{TrayIconBuilder, TrayIconEvent};
@@ -325,26 +362,65 @@ mod windows_client {
             let menu = Menu::new();
             let _ = menu.append(&quit_item);
 
-            let tray_icon = TrayIconBuilder::new()
+            info!("TrayState::new — building tray icon (menu_on_left_click=false)");
+            let tray_icon = match TrayIconBuilder::new()
                 .with_menu(Box::new(menu))
                 .with_menu_on_left_click(false)
                 .with_icon(icon_amber.clone())
                 .with_tooltip("ClipRelay | connecting")
                 .build()
-                .ok()?;
+            {
+                Ok(t) => {
+                    info!("TrayState::new — tray icon built successfully");
+                    t
+                }
+                Err(err) => {
+                    error!("TrayState::new — tray icon build FAILED: {err}");
+                    return None;
+                }
+            };
 
             // OS-level callbacks — fire from the Windows message handler so
             // they work even when the eframe event loop is sleeping.
             let ctx_menu = ctx.clone();
+            let quit_id_dbg = quit_id.clone();
             MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-                if event.id == quit_id {
+                // Log every menu event, even non-quit ones.
+                let is_quit = event.id == quit_id;
+                debug!(
+                    menu_event_id = ?event.id,
+                    quit_id = ?quit_id_dbg,
+                    is_quit,
+                    "MenuEvent received"
+                );
+                eprintln!(
+                    "[TRAY-DEBUG] MenuEvent received: id={:?}, quit_id={:?}, is_quit={}",
+                    event.id, quit_id_dbg, is_quit
+                );
+                if is_quit {
                     quit_flag.store(true, Ordering::SeqCst);
                     ctx_menu.request_repaint();
+                    debug!("quit_flag stored, repaint requested");
+                    eprintln!("[TRAY-DEBUG] quit_flag stored, repaint requested");
+
+                    // Fallback: if the eframe event loop is dormant (hidden
+                    // window), `request_repaint()` may never be honoured.
+                    // Give the event loop a short grace period to process the
+                    // quit flag cleanly, then force-exit.
+                    std::thread::spawn(|| {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        eprintln!("[TRAY-DEBUG] quit fallback: event loop did not exit in time, forcing exit");
+                        std::process::exit(0);
+                    });
                 }
             }));
 
             let ctx_tray = ctx.clone();
             TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
+                // Log EVERY tray icon event for debugging.
+                debug!(tray_event = ?event, "TrayIconEvent received");
+                eprintln!("[TRAY-DEBUG] TrayIconEvent: {event:?}");
+
                 // Only respond to left-button Up and DoubleClick events.
                 // Ignoring Down events prevents double-toggling when the
                 // Down and Up messages are dispatched in separate event-loop
@@ -360,9 +436,23 @@ mod windows_client {
                         ..
                     }
                 );
+                debug!(should_toggle, "tray toggle decision");
+                eprintln!("[TRAY-DEBUG] should_toggle={should_toggle}");
                 if should_toggle {
                     toggle_flag.store(true, Ordering::SeqCst);
                     ctx_tray.request_repaint();
+                    debug!("toggle_flag stored, repaint requested");
+                    eprintln!("[TRAY-DEBUG] toggle_flag stored, repaint requested");
+
+                    // Direct Win32 show/hide — bypasses the dormant eframe
+                    // event loop that never calls update() for hidden windows.
+                    if eframe_hwnd != 0 {
+                        let was_visible = shared_visible.load(Ordering::SeqCst);
+                        let new_visible = !was_visible;
+                        shared_visible.store(new_visible, Ordering::SeqCst);
+                        unsafe { win32_set_window_visible(eframe_hwnd, new_visible) };
+                        eprintln!("[TRAY-DEBUG] Win32 ShowWindow: visible={new_visible}");
+                    }
                 }
             }));
 
@@ -456,6 +546,8 @@ mod windows_client {
         hotkey_current: Option<HotKey>,
         hotkey_toggle_requested: Arc<AtomicBool>,
         hotkey_label: String,
+        // ── Shared visibility state (written by OS callbacks via Win32) ──
+        shared_visible: Arc<AtomicBool>,
     }
 
     impl ClipRelayApp {
@@ -481,6 +573,7 @@ mod windows_client {
                 hotkey_current: None,
                 hotkey_toggle_requested: Arc::new(AtomicBool::new(false)),
                 hotkey_label,
+                shared_visible: Arc::new(AtomicBool::new(true)),
             }
         }
 
@@ -530,11 +623,44 @@ mod windows_client {
             ));
 
             let history = load_history();
+
+            // ── Find the eframe window HWND for direct Win32 show/hide ──────
+            //
+            // eframe/winit does NOT call `update()` while the window is
+            // invisible (ViewportCommand::Visible(false)).  `request_repaint()`
+            // also has no effect.  The only reliable way to show/hide the
+            // window from OS-level callbacks (tray icon, global hotkey) is to
+            // call the Win32 `ShowWindow` / `SetForegroundWindow` API directly.
+            let eframe_hwnd = unsafe {
+                use windows_sys::Win32::UI::WindowsAndMessaging::FindWindowW;
+                let title = to_wide_null("ClipRelay");
+                FindWindowW(std::ptr::null(), title.as_ptr())
+            };
+            if eframe_hwnd == 0 {
+                warn!("FindWindowW(\"ClipRelay\") returned NULL — tray/hotkey toggle will be degraded");
+                eprintln!("[TRAY-DEBUG] FindWindowW returned NULL");
+            } else {
+                info!(eframe_hwnd, "eframe window HWND found");
+                eprintln!("[TRAY-DEBUG] eframe HWND = {eframe_hwnd}");
+            }
+
+            // Shared visibility state — OS callbacks mutate this directly.
+            self.shared_visible.store(!self.args.background, Ordering::SeqCst);
+
             let tray = TrayState::new(
                 ctx,
                 self.tray_quit_requested.clone(),
                 self.tray_toggle_requested.clone(),
+                eframe_hwnd,
+                self.shared_visible.clone(),
             );
+            if tray.is_some() {
+                info!("TrayState created successfully");
+                eprintln!("[TRAY-DEBUG] TrayState created successfully");
+            } else {
+                error!("TrayState creation FAILED — tray icon will not appear");
+                eprintln!("[TRAY-DEBUG] TrayState creation FAILED");
+            }
             let autostart_enabled = windows_autostart_is_enabled();
 
             // ── Global hotkey registration ──────────────────────────────────
@@ -567,10 +693,53 @@ mod windows_client {
 
             let hk_flag = self.hotkey_toggle_requested.clone();
             let ctx_hk = ctx.clone();
-            GlobalHotKeyEvent::set_event_handler(Some(move |_event: GlobalHotKeyEvent| {
+            let hk_hwnd = eframe_hwnd;
+            let hk_visible = self.shared_visible.clone();
+            GlobalHotKeyEvent::set_event_handler(Some(move |event: GlobalHotKeyEvent| {
+                debug!(hotkey_event = ?event, "GlobalHotKeyEvent received");
+                eprintln!("[HOTKEY-DEBUG] GlobalHotKeyEvent: {event:?}");
+                // Only respond to Pressed — ignore Released to prevent the
+                // flag from being set twice (which would double-toggle the
+                // window back to its original state).
+                if event.state == global_hotkey::HotKeyState::Released {
+                    eprintln!("[HOTKEY-DEBUG] ignoring Released event");
+                    return;
+                }
                 hk_flag.store(true, Ordering::SeqCst);
                 ctx_hk.request_repaint();
+                debug!("hotkey_toggle_flag stored, repaint requested");
+                eprintln!("[HOTKEY-DEBUG] hotkey_toggle_flag stored, repaint requested");
+
+                // Direct Win32 show/hide — bypasses the dormant eframe
+                // event loop that never calls update() for hidden windows.
+                if hk_hwnd != 0 {
+                    let was_visible = hk_visible.load(Ordering::SeqCst);
+                    let new_visible = !was_visible;
+                    hk_visible.store(new_visible, Ordering::SeqCst);
+                    unsafe { win32_set_window_visible(hk_hwnd, new_visible) };
+                    eprintln!("[HOTKEY-DEBUG] Win32 ShowWindow: visible={new_visible}");
+                }
             }));
+
+            // ── Event-loop keepalive ─────────────────────────────────────────
+            //
+            // When the window is hidden (minimised to tray), eframe/winit may
+            // stop calling `update()` entirely — even when `request_repaint()`
+            // is called from OS callbacks.  Spawn a dedicated thread that
+            // periodically wakes the event loop so tray/hotkey flags are
+            // always processed promptly.
+            {
+                let ctx_keepalive = ctx.clone();
+                std::thread::Builder::new()
+                    .name("eframe-keepalive".into())
+                    .spawn(move || {
+                        loop {
+                            std::thread::sleep(Duration::from_millis(200));
+                            ctx_keepalive.request_repaint();
+                        }
+                    })
+                    .ok();
+            }
 
             self.phase = AppPhase::Running {
                 config,
@@ -928,24 +1097,40 @@ mod windows_client {
 
             // ── Process tray / hotkey event flags ───────────────────────────
             //
-            // These flags are set by OS-level event handlers registered in
-            // TrayState::new() and GlobalHotKeyEvent::set_event_handler().
-            // They call ctx.request_repaint() to wake the eframe event loop
-            // even when the window is hidden.
+            // The OS-level callbacks (tray icon, global hotkey) now call
+            // Win32 ShowWindow/SetForegroundWindow directly, so the actual
+            // show/hide has already happened by the time we get here.  This
+            // block syncs the local `window_visible` flag from the shared
+            // atomic and issues the corresponding ViewportCommands so that
+            // eframe's own visibility tracking stays consistent.
             if self.tray_quit_requested.load(Ordering::SeqCst) {
+                info!("update loop: tray_quit_requested=true — exiting");
+                eprintln!("[TRAY-DEBUG] update loop: tray_quit_requested=true — exiting");
                 if let Err(err) = ui_state::save_ui_state_with_retry(&self.ui_state) {
                     warn!("failed to save ui_state on quit: {err}");
                 }
-                // Force-exit the process. The tokio runtime and
-                // background threads prevent a clean shutdown via
-                // ViewportCommand::Close alone.
                 std::process::exit(0);
             }
 
-            if self.tray_toggle_requested.swap(false, Ordering::SeqCst)
-                || self.hotkey_toggle_requested.swap(false, Ordering::SeqCst)
-            {
-                *window_visible = !*window_visible;
+            let tray_toggle = self.tray_toggle_requested.swap(false, Ordering::SeqCst);
+            let hk_toggle = self.hotkey_toggle_requested.swap(false, Ordering::SeqCst);
+            if tray_toggle || hk_toggle {
+                // The OS callback already performed the Win32 show/hide.
+                // Sync local state from the shared atomic.
+                let actual_visible = self.shared_visible.load(Ordering::SeqCst);
+                debug!(
+                    tray_toggle,
+                    hk_toggle,
+                    old_visible = *window_visible,
+                    actual_visible,
+                    "syncing toggle from shared_visible"
+                );
+                eprintln!(
+                    "[TRAY-DEBUG] update loop: tray_toggle={tray_toggle}, hk_toggle={hk_toggle}, \
+                     window_visible={} -> {actual_visible}",
+                    *window_visible
+                );
+                *window_visible = actual_visible;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(*window_visible));
                 if *window_visible {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -978,6 +1163,7 @@ mod windows_client {
                     ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
                     *window_visible = false;
+                    self.shared_visible.store(false, Ordering::SeqCst);
                 }
             }
 
@@ -2096,6 +2282,20 @@ mod windows_client {
     fn init_logging() {
         const MAX_ATTEMPTS: u32 = 3;
         const BACKOFF_BASE_MS: u64 = 50;
+
+        // If CLIPRELAY_DEBUG or RUST_LOG is set, allocate a console window so
+        // that eprintln! output from OS callbacks is visible for diagnostics.
+        // This is a no-op when a console is already attached (launched from
+        // PowerShell etc.).
+        if std::env::var_os("CLIPRELAY_DEBUG").is_some()
+            || std::env::var_os("RUST_LOG").is_some()
+        {
+            unsafe {
+                // windows_sys re-exports kernel32 AllocConsole.
+                windows_sys::Win32::System::Console::AllocConsole();
+            }
+            eprintln!("[DEBUG] Console allocated for diagnostic output");
+        }
 
         let env_filter = match std::env::var("RUST_LOG") {
             Ok(_) => tracing_subscriber::EnvFilter::from_default_env(),
