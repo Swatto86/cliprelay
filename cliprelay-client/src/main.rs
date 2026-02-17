@@ -2994,9 +2994,16 @@ mod windows_client {
         dir.join("cliprelay-client.log")
     }
 
+    /// Return a logical-pixel value unchanged.
+    ///
+    /// NWG's builder `.position()`/`.size()` and `set_position()`/`set_size()`
+    /// already convert logical → physical internally, so callers must pass
+    /// **unscaled** logical values.  This function previously multiplied by
+    /// `nwg::scale_factor()`, which caused **double-scaling** on high-DPI
+    /// displays (e.g. 4K @ 150 %).  It is now an identity to fix that bug
+    /// while keeping all call-sites readable.
     fn scale_px(px: i32) -> i32 {
-        let scaled = (f64::from(px) * nwg::scale_factor()).round() as i32;
-        scaled.max(1)
+        px
     }
 
     /// Convert a **physical-pixel** monitor rect (from `nwg::Monitor`) to the
