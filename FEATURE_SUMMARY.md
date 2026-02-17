@@ -74,16 +74,15 @@ When you launch the Windows client **without** a `--room-code` CLI argument, you
 ## UI Improvements (Previous Work)
 
 ### Window Sizing ✅
-- Send window: 420×340px
-- Options window: 440×340px
-- Popup window: 420×260px  
-- Setup dialog: 460×280px
+- Single tabbed window: 560×420px (default), 400×300px (minimum)
+- Window starts centered on screen
+- Tabs: Send | Options | Notifications
 - All with consistent 16px margins to prevent button clipping
 
 ### DPI Scaling ✅
-- All coordinates scaled via `scale_px()` helper
-- Uses `nwg::scale_factor()` for DPI awareness
-- Supports high-DPI displays properly
+- Handled automatically by egui/eframe immediate-mode rendering
+- No manual DPI conversion needed
+- Supports high-DPI and 4K displays properly
 
 ### Setup Dialog Polish ✅  
 - Welcome message: "Welcome! Enter your room details to get started:"

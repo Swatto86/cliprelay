@@ -5,7 +5,7 @@ ClipRelay is an end-to-end encrypted, relay-based clipboard and file sync tool.
 - Sync **clipboard text** and **files up to 5 MiB** between devices that share a room code.
 - Clients connect outbound over WebSocket (`ws://` or `wss://`) to a relay.
 - All payloads are encrypted client-side with XChaCha20-Poly1305 — the relay only forwards opaque blobs and cannot decrypt anything.
-- Windows clients use a native WinAPI tray-first UI (`native-windows-gui`) with red/amber/green tray status indicators, balloon notifications, and a DPI-aware popup for apply/dismiss/save actions.
+- Windows clients use an egui/eframe tray-first UI with red/amber/green tray status indicators, a tabbed single-window interface (Send | Options | Notifications), and automatic DPI scaling.
 
 ## Workspace Layout
 

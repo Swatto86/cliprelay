@@ -491,23 +491,36 @@ mod windows_client {
                 ui.add_space(16.0);
 
                 if let Some(ref cfg) = saved_config {
-                    ui.label(format!(
-                        "You have a saved room:\n\n\
-                         Room: {}\n\
-                         Server: {}\n\
-                         Client: {}\n\n\
-                         Use saved room or setup a new one?",
-                        cfg.room_code, cfg.server_url, cfg.device_name
-                    ));
+                    ui.label("You have a saved room:");
+                    ui.add_space(8.0);
+
+                    egui::Grid::new("saved_room_grid")
+                        .num_columns(2)
+                        .spacing([12.0, 6.0])
+                        .show(ui, |ui| {
+                            ui.strong("Room:");
+                            ui.label(&cfg.room_code);
+                            ui.end_row();
+
+                            ui.strong("Server:");
+                            ui.label(&cfg.server_url);
+                            ui.end_row();
+
+                            ui.strong("Client:");
+                            ui.label(&cfg.device_name);
+                            ui.end_row();
+                        });
 
                     ui.add_space(20.0);
                     ui.horizontal(|ui| {
                         if ui.button("Use Saved Room").clicked() {
                             action = Some(ChooseRoomAction::UseSaved);
                         }
+                        ui.add_space(4.0);
                         if ui.button("Setup New Room").clicked() {
                             action = Some(ChooseRoomAction::SetupNew);
                         }
+                        ui.add_space(4.0);
                         if ui.button("Cancel").clicked() {
                             action = Some(ChooseRoomAction::Cancel);
                         }
@@ -519,6 +532,7 @@ mod windows_client {
                         if ui.button("Setup New Room").clicked() {
                             action = Some(ChooseRoomAction::SetupNew);
                         }
+                        ui.add_space(4.0);
                         if ui.button("Cancel").clicked() {
                             action = Some(ChooseRoomAction::Cancel);
                         }
@@ -568,7 +582,9 @@ mod windows_client {
 
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.add_space(20.0);
-                ui.heading("Welcome! Enter your room details to get started:");
+                ui.heading("Room Setup");
+                ui.add_space(4.0);
+                ui.label("Enter your room details to get started.");
                 ui.add_space(16.0);
 
                 egui::Grid::new("setup_grid")
@@ -590,9 +606,9 @@ mod windows_client {
                         ui.end_row();
                     });
 
-                ui.add_space(12.0);
+                ui.add_space(8.0);
                 ui.label(
-                    "Tip: Use the same room code on multiple devices to sync clipboards.",
+                    egui::RichText::new("Tip: Use the same room code on multiple devices to sync clipboards.").weak()
                 );
 
                 if let Some(ref msg) = error_message {
@@ -605,6 +621,7 @@ mod windows_client {
                     if ui.button("Connect").clicked() {
                         action = Some(SetupAction::Connect);
                     }
+                    ui.add_space(4.0);
                     if ui.button("Cancel").clicked() {
                         action = Some(SetupAction::Cancel);
                     }
@@ -1067,39 +1084,39 @@ mod windows_client {
                     .num_columns(2)
                     .spacing([12.0, 4.0])
                     .show(ui, |ui| {
-                        ui.label("Server URL:");
+                        ui.strong("Server URL:");
                         ui.label(&config.server_url);
                         ui.end_row();
 
-                        ui.label("Room code:");
+                        ui.strong("Room code:");
                         ui.label(&config.room_code);
                         ui.end_row();
 
-                        ui.label("Room ID:");
-                        ui.label(&config.room_id);
+                        ui.strong("Room ID:");
+                        ui.label(egui::RichText::new(&config.room_id).monospace().weak());
                         ui.end_row();
 
-                        ui.label("Client name:");
+                        ui.strong("Client name:");
                         ui.label(&config.device_name);
                         ui.end_row();
 
-                        ui.label("Device ID:");
-                        ui.label(&config.device_id);
+                        ui.strong("Device ID:");
+                        ui.label(egui::RichText::new(&config.device_id).monospace().weak());
                         ui.end_row();
 
-                        ui.label("Connection:");
+                        ui.strong("Connection:");
                         ui.label(connection_status);
                         ui.end_row();
 
-                        ui.label("Peers:");
+                        ui.strong("Peers:");
                         ui.label(format!("{}", peers.len()));
                         ui.end_row();
 
-                        ui.label("Room key:");
+                        ui.strong("Room key:");
                         ui.label(if room_key_ready { "ready" } else { "not ready" });
                         ui.end_row();
 
-                        ui.label("Last sent:");
+                        ui.strong("Last sent:");
                         ui.label(
                             last_sent_time
                                 .map(format_timestamp_local)
@@ -1107,7 +1124,7 @@ mod windows_client {
                         );
                         ui.end_row();
 
-                        ui.label("Last received:");
+                        ui.strong("Last received:");
                         ui.label(
                             last_received_time
                                 .map(format_timestamp_local)
@@ -1176,22 +1193,25 @@ mod windows_client {
                 ui.add_space(4.0);
 
                 if history.is_empty() {
-                    ui.label("(no activity yet)");
+                    ui.label(egui::RichText::new("(no activity yet)").weak());
                 } else {
                     for (idx, entry) in history.iter().take(30).enumerate() {
                         let dir = match entry.direction {
-                            ActivityDirection::Sent => "SENT",
-                            ActivityDirection::Received => "RECV",
+                            ActivityDirection::Sent => "↑ SENT",
+                            ActivityDirection::Received => "↓ RECV",
                         };
                         let ts = format_timestamp_local(entry.ts_unix_ms);
-                        ui.label(format!(
-                            "{}. [{}] {} {}: {}",
-                            idx + 1,
-                            ts,
-                            dir,
-                            entry.kind,
-                            entry.summary
-                        ));
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(format!("{}.", idx + 1)).weak(),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!("[{}] {} {}", ts, dir, entry.kind)).strong()
+                            );
+                        });
+                        ui.indent(format!("hist_{idx}"), |ui| {
+                            ui.label(egui::RichText::new(&entry.summary).weak());
+                        });
                     }
                 }
             });
@@ -1209,14 +1229,14 @@ mod windows_client {
         ) {
             if notifications.is_empty() {
                 ui.centered_and_justified(|ui| {
-                    ui.label("No pending notifications");
+                    ui.label(egui::RichText::new("No pending notifications").weak());
                 });
                 return;
             }
 
             let total = notifications.len();
             if total > 1 {
-                ui.label(format!("{total} notifications pending"));
+                ui.label(egui::RichText::new(format!("{total} notifications pending")).strong());
                 ui.add_space(8.0);
             }
 
@@ -1231,7 +1251,10 @@ mod windows_client {
                         ..
                     } => {
                         let name = resolve_peer_name(peers, sender_device_id);
-                        ui.label(format!("From: {name}"));
+                        ui.horizontal(|ui| {
+                            ui.strong("From:");
+                            ui.label(&name);
+                        });
                         ui.add_space(8.0);
 
                         let available = ui.available_size();
@@ -1247,6 +1270,7 @@ mod windows_client {
                             if ui.button("Apply to Clipboard").clicked() {
                                 action = Some(NotificationAction::Apply);
                             }
+                            ui.add_space(4.0);
                             if ui.button("Dismiss").clicked() {
                                 action = Some(NotificationAction::Dismiss);
                             }
@@ -1258,7 +1282,10 @@ mod windows_client {
                         ..
                     } => {
                         let name = resolve_peer_name(peers, sender_device_id);
-                        ui.label(format!("From: {name}"));
+                        ui.horizontal(|ui| {
+                            ui.strong("From:");
+                            ui.label(&name);
+                        });
                         ui.add_space(8.0);
 
                         let available = ui.available_size();
@@ -1274,6 +1301,7 @@ mod windows_client {
                             if ui.button("Save to Downloads").clicked() {
                                 action = Some(NotificationAction::Apply);
                             }
+                            ui.add_space(4.0);
                             if ui.button("Dismiss").clicked() {
                                 action = Some(NotificationAction::Dismiss);
                             }
@@ -2776,6 +2804,7 @@ mod windows_client {
         let mut style = (*ctx.style()).clone();
         style.spacing.item_spacing = egui::vec2(8.0, 6.0);
         style.spacing.button_padding = egui::vec2(14.0, 6.0);
+        style.spacing.window_margin = egui::Margin::same(12.0);
         ctx.set_style(style);
     }
 

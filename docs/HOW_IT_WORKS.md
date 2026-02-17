@@ -44,7 +44,7 @@ Source:
 
 Responsibilities:
 
-- Native Windows UI (tray-first) via `native-windows-gui`
+- Tabbed single-window UI (tray-first) via `eframe`/`egui`
 - Clipboard integration (`arboard`)
 - Background runtime (`tokio`) for network + crypto orchestration
 - Local config persistence (first-run GUI prompt if no CLI args)
@@ -142,20 +142,22 @@ Background mode:
 
 ### 6.3 User actions
 
-- Double-click tray icon: open/close Send window
-- Right-click tray icon: Options / Quit
+- Left-click / double-click tray icon: toggle window visibility
+- Right-click tray icon: Quit
+- Window tabs: **Send** | **Options** | **Notifications**
 
-Options:
+Options tab:
 
-- Auto apply (when enabled, incoming text is applied automatically)
+- Auto apply (when enabled, incoming text is applied automatically without needing to visit Notifications)
 - Start with Windows (adds/removes a per-user startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that launches `"cliprelay-client.exe" --background`; implemented via WinAPI registry calls)
+- Activity history (recent sent/received items)
 
 ## 7) Sending Mode (Manual Only)
 
 This client is **manual-send only**:
 
 - It does **not** automatically transmit everything you copy.
-- To send, open the Send window (double-click the tray icon), paste/type into the textbox, and click **Send**.
+- To send, open the window (click the tray icon), switch to the **Send** tab, paste/type into the textbox, and click **Send Text**.
 - Receiving still shows tray + popup notifications.
 
 ### 7.1 Files (MVP)
