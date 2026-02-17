@@ -270,7 +270,6 @@ mod windows_client {
 
     struct TrayState {
         tray_icon: tray_icon::TrayIcon,
-        options_id: tray_icon::menu::MenuId,
         quit_id: tray_icon::menu::MenuId,
         current_status: TrayStatus,
         icon_red: tray_icon::Icon,
@@ -287,13 +286,10 @@ mod windows_client {
             let icon_amber = load_tray_icon_from_ico(TRAY_ICON_AMBER_BYTES)?;
             let icon_green = load_tray_icon_from_ico(TRAY_ICON_GREEN_BYTES)?;
 
-            let options_item = MenuItem::new("Options", true, None);
             let quit_item = MenuItem::new("Quit", true, None);
-            let options_id = options_item.id().clone();
             let quit_id = quit_item.id().clone();
 
             let menu = Menu::new();
-            let _ = menu.append(&options_item);
             let _ = menu.append(&quit_item);
 
             let tray_icon = TrayIconBuilder::new()
@@ -305,7 +301,6 @@ mod windows_client {
 
             Some(Self {
                 tray_icon,
-                options_id,
                 quit_id,
                 current_status: TrayStatus::Amber,
                 icon_red,
@@ -812,19 +807,16 @@ mod windows_client {
 
                 if let Some(tray_state) = tray.as_ref() {
                     while let Ok(event) = MenuEvent::receiver().try_recv() {
-                        if event.id == tray_state.options_id {
-                            *active_tab = Tab::Options;
-                            *window_visible = true;
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                        } else if event.id == tray_state.quit_id {
+                        if event.id == tray_state.quit_id {
                             if let Err(err) =
                                 ui_state::save_ui_state_with_retry(&self.ui_state)
                             {
                                 warn!("failed to save ui_state on quit: {err}");
                             }
-                            self.wants_quit = true;
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            // Force-exit the process. The tokio runtime and
+                            // background threads prevent a clean shutdown via
+                            // ViewportCommand::Close alone.
+                            std::process::exit(0);
                         }
                     }
                 }
