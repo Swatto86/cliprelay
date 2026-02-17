@@ -19,7 +19,7 @@ ClipRelay synchronizes clipboard text across online devices in a shared room usi
 - `cliprelay-relay/src/lib.rs`: reusable relay app/router/server logic.
 - `cliprelay-relay/src/main.rs`: relay CLI entrypoint.
 - `cliprelay-relay/tests/e2e_relay.rs`: relay E2E integration tests (forwarding, capacity, invalid-first-frame, sender-mismatch, malformed-frame, unexpected-control).
-- `cliprelay-client/src/main.rs`: eframe/egui tray-first app with tabbed single-window UI (Send | Options | Notifications). Status-indicator tray icons (red/amber/green), left-click toggle window, right-click Quit menu. Window starts centered on screen. Contains reconnection loop, WebSocket keepalive pings, and egui immediate-mode rendering for automatic DPI scaling.
+- `cliprelay-client/src/main.rs`: eframe/egui tray-first app with tabbed single-window UI (Send | Options | Notifications). Status-indicator tray icons (red/amber/green), left-click toggle window, right-click Quit menu. Window starts centered on screen. Contains reconnection loop, WebSocket keepalive pings, egui immediate-mode rendering, global hotkey support (default Ctrl+Alt+C) for toggling window visibility, and OS-level tray/menu event handlers that wake the eframe event loop even when the window is hidden.
 - `cliprelay-client/src/ui_layout.rs`: UI sizing constants (platform-independent f32 values for default/minimum window dimensions).
 - `cliprelay-client/src/ui_state.rs`: UI window placement persistence (load/save with size bounds, clamping helper).
 - `cliprelay-client/assets/app.manifest`: Windows manifest with per-monitor DPI awareness (PerMonitorV2) and common-controls v6.
@@ -50,6 +50,9 @@ ClipRelay synchronizes clipboard text across online devices in a shared room usi
 
 ### egui Immediate-Mode UI
 The client uses eframe/egui for all UI rendering. egui handles DPI scaling automatically through immediate-mode rendering — no manual pixel positioning or DPI conversion is needed. The app uses a single window with tabs (Send, Options, Notifications) managed by a top panel tab bar, a bottom panel status bar, and the active tab in the central panel. A `RepaintingSender` wrapper around `std::sync::mpsc::Sender<UiEvent>` calls `ctx.request_repaint()` whenever background events arrive, ensuring the UI stays responsive even when the window is hidden.
+
+### Tray & Hotkey Event Handling
+System tray events (quit menu, left-click toggle) and global hotkey events use the `set_event_handler` callback pattern from `tray-icon` and `global-hotkey` crates respectively. These callbacks fire directly from the OS message handler thread and set `Arc<AtomicBool>` flags, then call `ctx.request_repaint()` to wake the eframe event loop. This ensures the quit button and window toggle work reliably even when the window is hidden (where `request_repaint_after` timer-based repaints may be suppressed by the OS). The global hotkey defaults to Ctrl+Alt+C and can be changed in the Options tab; the setting is persisted in `ui_state.json`.
 
 ## Build/Test/Run
 - Build: `cargo check`

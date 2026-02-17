@@ -21,7 +21,10 @@ mod windows_client {
         fs::{File, OpenOptions},
         io::{self, Write},
         path::{Path, PathBuf},
-        sync::{Arc, Mutex},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc, Mutex,
+        },
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
@@ -36,6 +39,10 @@ mod windows_client {
     };
     use eframe::egui;
     use futures::{SinkExt, StreamExt};
+    use global_hotkey::{
+        GlobalHotKeyEvent, GlobalHotKeyManager,
+        hotkey::{Code, HotKey, Modifiers},
+    };
     use serde::{Deserialize, Serialize};
     use sha2::{Digest, Sha256};
     use tokio::{runtime::Runtime, sync::mpsc, time::timeout};
@@ -67,6 +74,15 @@ mod windows_client {
     const FILE_CHUNK_RAW_BYTES: usize = 64 * 1024;
     const MAX_NOTIFICATIONS: usize = 20;
     const MAX_HISTORY_ENTRIES: usize = 200;
+
+    const DEFAULT_HOTKEY_LABEL: &str = "Ctrl+Alt+C";
+    const HOTKEY_OPTIONS: &[&str] = &[
+        "Ctrl+Alt+C",
+        "Ctrl+Alt+V",
+        "Ctrl+Shift+C",
+        "Ctrl+Shift+V",
+        "Disabled",
+    ];
 
     // ─── CLI args ──────────────────────────────────────────────────────────────
 
@@ -270,7 +286,6 @@ mod windows_client {
 
     struct TrayState {
         tray_icon: tray_icon::TrayIcon,
-        quit_id: tray_icon::menu::MenuId,
         current_status: TrayStatus,
         icon_red: tray_icon::Icon,
         icon_amber: tray_icon::Icon,
@@ -278,9 +293,20 @@ mod windows_client {
     }
 
     impl TrayState {
-        fn new() -> Option<Self> {
-            use tray_icon::menu::{Menu, MenuItem};
-            use tray_icon::TrayIconBuilder;
+        /// Create the system tray icon and register OS-level event handlers.
+        ///
+        /// `quit_flag` is set `true` when the user clicks "Quit" in the tray
+        /// context menu.  `toggle_flag` is set `true` on a left-click or
+        /// double-click of the tray icon itself.  Both handlers call
+        /// `ctx.request_repaint()` to wake the eframe event loop even when the
+        /// window is hidden (which suppresses normal repaint timers).
+        fn new(
+            ctx: &egui::Context,
+            quit_flag: Arc<AtomicBool>,
+            toggle_flag: Arc<AtomicBool>,
+        ) -> Option<Self> {
+            use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+            use tray_icon::{TrayIconBuilder, TrayIconEvent};
 
             let icon_red = load_tray_icon_from_ico(TRAY_ICON_RED_BYTES)?;
             let icon_amber = load_tray_icon_from_ico(TRAY_ICON_AMBER_BYTES)?;
@@ -299,9 +325,33 @@ mod windows_client {
                 .build()
                 .ok()?;
 
+            // OS-level callbacks — fire from the Windows message handler so
+            // they work even when the eframe event loop is sleeping.
+            let ctx_menu = ctx.clone();
+            MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+                if event.id == quit_id {
+                    quit_flag.store(true, Ordering::SeqCst);
+                    ctx_menu.request_repaint();
+                }
+            }));
+
+            let ctx_tray = ctx.clone();
+            TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
+                let should_toggle = matches!(
+                    &event,
+                    TrayIconEvent::Click {
+                        button: tray_icon::MouseButton::Left,
+                        ..
+                    } | TrayIconEvent::DoubleClick { .. }
+                );
+                if should_toggle {
+                    toggle_flag.store(true, Ordering::SeqCst);
+                    ctx_tray.request_repaint();
+                }
+            }));
+
             Some(Self {
                 tray_icon,
-                quit_id,
                 current_status: TrayStatus::Amber,
                 icon_red,
                 icon_amber,
@@ -382,6 +432,14 @@ mod windows_client {
         wants_quit: bool,
         /// egui context for requesting repaints from background threads.
         egui_ctx: Option<egui::Context>,
+        // ── Tray event flags (set by OS callbacks, read in update loop) ──
+        tray_quit_requested: Arc<AtomicBool>,
+        tray_toggle_requested: Arc<AtomicBool>,
+        // ── Global hotkey state ─────────────────────────────────────────
+        hotkey_manager: Option<GlobalHotKeyManager>,
+        hotkey_current: Option<HotKey>,
+        hotkey_toggle_requested: Arc<AtomicBool>,
+        hotkey_label: String,
     }
 
     impl ClipRelayApp {
@@ -391,12 +449,22 @@ mod windows_client {
             args: ClientArgs,
         ) -> Self {
             let ui_state = load_ui_state_logged();
+            let hotkey_label = ui_state
+                .hotkey
+                .clone()
+                .unwrap_or_else(|| DEFAULT_HOTKEY_LABEL.to_owned());
             Self {
                 phase: initial_phase,
                 args,
                 ui_state,
                 wants_quit: false,
                 egui_ctx: None,
+                tray_quit_requested: Arc::new(AtomicBool::new(false)),
+                tray_toggle_requested: Arc::new(AtomicBool::new(false)),
+                hotkey_manager: None,
+                hotkey_current: None,
+                hotkey_toggle_requested: Arc::new(AtomicBool::new(false)),
+                hotkey_label,
             }
         }
 
@@ -446,8 +514,33 @@ mod windows_client {
             ));
 
             let history = load_history();
-            let tray = TrayState::new();
+            let tray = TrayState::new(
+                ctx,
+                self.tray_quit_requested.clone(),
+                self.tray_toggle_requested.clone(),
+            );
             let autostart_enabled = windows_autostart_is_enabled();
+
+            // ── Global hotkey registration ──────────────────────────────────
+            let manager = GlobalHotKeyManager::new().ok();
+            let mut hotkey_current = None;
+            if let (Some(mgr), Some(hk)) =
+                (&manager, parse_hotkey_label(&self.hotkey_label))
+            {
+                match mgr.register(hk) {
+                    Ok(()) => hotkey_current = Some(hk),
+                    Err(err) => warn!("global hotkey register failed: {err}"),
+                }
+            }
+            self.hotkey_manager = manager;
+            self.hotkey_current = hotkey_current;
+
+            let hk_flag = self.hotkey_toggle_requested.clone();
+            let ctx_hk = ctx.clone();
+            GlobalHotKeyEvent::set_event_handler(Some(move |_event: GlobalHotKeyEvent| {
+                hk_flag.store(true, Ordering::SeqCst);
+                ctx_hk.request_repaint();
+            }));
 
             self.phase = AppPhase::Running {
                 config,
@@ -671,6 +764,11 @@ mod windows_client {
 
         #[allow(clippy::too_many_arguments)]
         fn render_running(&mut self, ctx: &egui::Context) {
+            // Pre-bind hotkey_label so the central-panel closure can capture
+            // it without borrowing all of `self`.
+            let hotkey_label = &mut self.hotkey_label;
+            let prev_hotkey_label = hotkey_label.clone();
+
             // We need to extract fields from the Running variant. Use a match
             // to get mutable access to all fields at once.
             let AppPhase::Running {
@@ -798,44 +896,29 @@ mod windows_client {
                 }
             }
 
-            // ── Process tray events ────────────────────────────────────────────
-            {
-                use tray_icon::menu::MenuEvent;
-                use tray_icon::TrayIconEvent;
-
-                while let Ok(event) = TrayIconEvent::receiver().try_recv() {
-                    // Left click or double click → toggle window visibility.
-                    let toggle = match &event {
-                        TrayIconEvent::Click {
-                            button: tray_icon::MouseButton::Left,
-                            ..
-                        } => true,
-                        TrayIconEvent::DoubleClick { .. } => true,
-                        _ => false,
-                    };
-                    if toggle {
-                        *window_visible = !*window_visible;
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(*window_visible));
-                        if *window_visible {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                        }
-                    }
+            // ── Process tray / hotkey event flags ───────────────────────────
+            //
+            // These flags are set by OS-level event handlers registered in
+            // TrayState::new() and GlobalHotKeyEvent::set_event_handler().
+            // They call ctx.request_repaint() to wake the eframe event loop
+            // even when the window is hidden.
+            if self.tray_quit_requested.load(Ordering::SeqCst) {
+                if let Err(err) = ui_state::save_ui_state_with_retry(&self.ui_state) {
+                    warn!("failed to save ui_state on quit: {err}");
                 }
+                // Force-exit the process. The tokio runtime and
+                // background threads prevent a clean shutdown via
+                // ViewportCommand::Close alone.
+                std::process::exit(0);
+            }
 
-                if let Some(tray_state) = tray.as_ref() {
-                    while let Ok(event) = MenuEvent::receiver().try_recv() {
-                        if event.id == tray_state.quit_id {
-                            if let Err(err) =
-                                ui_state::save_ui_state_with_retry(&self.ui_state)
-                            {
-                                warn!("failed to save ui_state on quit: {err}");
-                            }
-                            // Force-exit the process. The tokio runtime and
-                            // background threads prevent a clean shutdown via
-                            // ViewportCommand::Close alone.
-                            std::process::exit(0);
-                        }
-                    }
+            if self.tray_toggle_requested.swap(false, Ordering::SeqCst)
+                || self.hotkey_toggle_requested.swap(false, Ordering::SeqCst)
+            {
+                *window_visible = !*window_visible;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(*window_visible));
+                if *window_visible {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
             }
 
@@ -954,6 +1037,7 @@ mod windows_client {
                             last_error,
                             history,
                             runtime_cmd_tx,
+                            hotkey_label,
                             toast_message,
                         );
                     }
@@ -969,6 +1053,30 @@ mod windows_client {
                     }
                 }
             });
+
+            // ── Handle global hotkey change from Options tab ───────────────
+            if *hotkey_label != prev_hotkey_label {
+                // Unregister previous hotkey if any.
+                if let (Some(old_hk), Some(mgr)) =
+                    (self.hotkey_current.take(), &self.hotkey_manager)
+                {
+                    let _ = mgr.unregister(old_hk);
+                }
+                // Register the newly selected hotkey.
+                if let (Some(new_hk), Some(mgr)) =
+                    (parse_hotkey_label(hotkey_label), &self.hotkey_manager)
+                {
+                    match mgr.register(new_hk) {
+                        Ok(()) => self.hotkey_current = Some(new_hk),
+                        Err(err) => warn!("hotkey register failed: {err}"),
+                    }
+                }
+                // Persist the new setting.
+                self.ui_state.hotkey = Some(hotkey_label.clone());
+                if let Err(err) = ui_state::save_ui_state_with_retry(&self.ui_state) {
+                    warn!("failed to save hotkey setting: {err}");
+                }
+            }
 
             // Request periodic repaint so we process runtime events even when idle.
             ctx.request_repaint_after(Duration::from_millis(100));
@@ -1074,6 +1182,7 @@ mod windows_client {
             last_error: &Option<String>,
             history: &VecDeque<ActivityEntry>,
             runtime_cmd_tx: &mpsc::UnboundedSender<RuntimeCommand>,
+            hotkey_label: &mut String,
             toast_message: &mut Option<(String, u64)>,
         ) {
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -1184,6 +1293,27 @@ mod windows_client {
                         }
                     }
                 }
+
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(8.0);
+
+                ui.label("Show/hide hotkey:");
+                ui.add_space(2.0);
+                egui::ComboBox::from_id_salt("hotkey_combo")
+                    .selected_text(hotkey_label.as_str())
+                    .show_ui(ui, |ui| {
+                        for &option in HOTKEY_OPTIONS {
+                            ui.selectable_value(hotkey_label, option.to_owned(), option);
+                        }
+                    });
+                ui.add_space(2.0);
+                ui.label(
+                    egui::RichText::new(
+                        "Press this key combination to show or hide the ClipRelay window.",
+                    )
+                    .weak(),
+                );
 
                 ui.add_space(12.0);
                 ui.separator();
@@ -1470,6 +1600,32 @@ mod windows_client {
             return TrayStatus::Green;
         }
         TrayStatus::Amber
+    }
+
+    /// Convert a human-readable hotkey label into a [`HotKey`] value.
+    ///
+    /// Returns `None` for `"Disabled"` or any unrecognised string, which
+    /// means "no global hotkey registered".
+    fn parse_hotkey_label(label: &str) -> Option<HotKey> {
+        match label {
+            "Ctrl+Alt+C" => Some(HotKey::new(
+                Some(Modifiers::CONTROL | Modifiers::ALT),
+                Code::KeyC,
+            )),
+            "Ctrl+Alt+V" => Some(HotKey::new(
+                Some(Modifiers::CONTROL | Modifiers::ALT),
+                Code::KeyV,
+            )),
+            "Ctrl+Shift+C" => Some(HotKey::new(
+                Some(Modifiers::CONTROL | Modifiers::SHIFT),
+                Code::KeyC,
+            )),
+            "Ctrl+Shift+V" => Some(HotKey::new(
+                Some(Modifiers::CONTROL | Modifiers::SHIFT),
+                Code::KeyV,
+            )),
+            _ => None, // "Disabled" or unknown
+        }
     }
 
     fn load_ui_state_logged() -> SavedUiState {

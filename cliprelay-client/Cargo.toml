@@ -27,6 +27,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
+global-hotkey = "0.6"
 image = { version = "0.25", default-features = false, features = ["ico"] }
 tray-icon = "0.17"
 rfd = "0.15"
