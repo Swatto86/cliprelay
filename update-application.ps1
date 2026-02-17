@@ -102,6 +102,13 @@ if ($DryRun) {
     Write-WarnLine "Dry-run mode enabled. No files, commits, tags, pushes, or releases will be changed."
 }
 
+$cargoToml = Join-Path $workspaceRoot "Cargo.toml"
+$currentVersion = Get-CurrentWorkspaceVersion -CargoTomlPath $cargoToml
+Write-Host ""
+Write-Host "Current version: " -NoNewline -ForegroundColor White
+Write-Host "$currentVersion" -ForegroundColor Yellow
+Write-Host ""
+
 if (-not $Version) {
     $Version = Read-Host "Enter new semantic version (x.y.z)"
 }
@@ -122,9 +129,6 @@ if (-not $Notes) {
 if ([string]::IsNullOrWhiteSpace($Notes)) {
     throw "Release notes are required and cannot be empty"
 }
-
-$cargoToml = Join-Path $workspaceRoot "Cargo.toml"
-$currentVersion = Get-CurrentWorkspaceVersion -CargoTomlPath $cargoToml
 
 $isGitRepo = Test-IsGitRepository
 if (-not $isGitRepo -and -not $DryRun) {
