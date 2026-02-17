@@ -2633,6 +2633,7 @@ mod windows_client {
         }
 
         let options = eframe::NativeOptions {
+            centered: true,
             viewport,
             ..Default::default()
         };
