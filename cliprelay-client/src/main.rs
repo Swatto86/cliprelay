@@ -3199,6 +3199,37 @@ mod windows_client {
     }
 
     fn configure_egui_style(ctx: &egui::Context) {
+        // Configure fonts for better Unicode glyph coverage
+        let mut fonts = egui::FontDefinitions::default();
+        
+        // On Windows, load Segoe UI which has excellent glyph coverage
+        #[cfg(target_os = "windows")]
+        {
+            use egui::{FontFamily, FontData};
+            
+            // Try to load Segoe UI from Windows system fonts directory
+            let font_path = std::path::PathBuf::from("C:\\Windows\\Fonts\\segoeui.ttf");
+            if let Ok(font_data) = std::fs::read(&font_path) {
+                fonts.font_data.insert(
+                    "SegoeUI".to_owned(),
+                    FontData::from_owned(font_data)
+                );
+                
+                // Add Segoe UI as the primary proportional font
+                fonts.families.get_mut(&FontFamily::Proportional)
+                    .unwrap()
+                    .insert(0, "SegoeUI".to_owned());
+                
+                // Add it to monospace as well for consistency
+                fonts.families.get_mut(&FontFamily::Monospace)
+                    .unwrap()
+                    .insert(0, "SegoeUI".to_owned());
+            }
+            // If loading fails, fall back to egui's default fonts (silently)
+        }
+        
+        ctx.set_fonts(fonts);
+        
         let mut style = (*ctx.style()).clone();
         style.spacing.item_spacing = egui::vec2(8.0, 6.0);
         style.spacing.button_padding = egui::vec2(14.0, 6.0);
