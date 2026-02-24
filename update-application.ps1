@@ -193,13 +193,19 @@ try {
         Write-Host ""
 
         Write-Info "Planned actions"
-        Write-Host "- Update Cargo.toml workspace version: $currentVersion -> $Version"
-        Write-Host "- Run: cargo update --workspace"
+        if ($Version -ne $currentVersion) {
+            Write-Host "- Update Cargo.toml workspace version: $currentVersion -> $Version"
+            Write-Host "- Run: cargo update --workspace"
+        } else {
+            Write-Host "- No version bump needed (same version re-release)"
+        }
         Write-Host "- Run: cargo build --release"
         Write-Host "- Run: cargo test"
         if ($isGitRepo) {
-            Write-Host "- Run: git add Cargo.toml Cargo.lock"
-            Write-Host "- Run: git commit -m \"chore: bump version to $Version\""
+            if ($Version -ne $currentVersion) {
+                Write-Host "- Run: git add Cargo.toml Cargo.lock"
+                Write-Host "- Run: git commit -m `"chore: bump version to $Version`""
+            }
             Write-Host "- Run: git tag -a $newTag -m <notes>"
             Write-Host "- Run: git push origin HEAD"
             Write-Host "- Run: git push origin $newTag"
@@ -212,18 +218,22 @@ try {
         exit 0
     }
 
-    Write-Info "Updating workspace version in Cargo.toml"
-    Update-WorkspaceVersion -CargoTomlPath $cargoToml -OldVersion $currentVersion -NewVersion $Version
-    $changedFiles.Add("Cargo.toml") | Out-Null
+    if ($Version -ne $currentVersion) {
+        Write-Info "Updating workspace version in Cargo.toml"
+        Update-WorkspaceVersion -CargoTomlPath $cargoToml -OldVersion $currentVersion -NewVersion $Version
+        $changedFiles.Add("Cargo.toml") | Out-Null
 
-    Write-Info "Updating lockfile via cargo update --workspace"
-    & cargo update --workspace
-    if ($LASTEXITCODE -ne 0) {
-        throw "cargo update --workspace failed"
-    }
+        Write-Info "Updating lockfile via cargo update --workspace"
+        & cargo update --workspace
+        if ($LASTEXITCODE -ne 0) {
+            throw "cargo update --workspace failed"
+        }
 
-    if (Test-Path $lockPath) {
-        $changedFiles.Add("Cargo.lock") | Out-Null
+        if (Test-Path $lockPath) {
+            $changedFiles.Add("Cargo.lock") | Out-Null
+        }
+    } else {
+        Write-WarnLine "Version unchanged ($Version). Skipping Cargo.toml and lockfile update."
     }
 
     Write-Host ""
@@ -275,14 +285,18 @@ try {
         }
     }
 
-    Write-Info "Staging release files"
-    Invoke-Git @('add', 'Cargo.toml')
-    if (Test-Path $lockPath) {
-        Invoke-Git @('add', 'Cargo.lock')
-    }
+    if ($changedFiles.Count -gt 0) {
+        Write-Info "Staging release files"
+        Invoke-Git @('add', 'Cargo.toml')
+        if (Test-Path $lockPath) {
+            Invoke-Git @('add', 'Cargo.lock')
+        }
 
-    Write-Info "Creating version bump commit"
-    Invoke-Git @('commit', '-m', "chore: bump version to $Version")
+        Write-Info "Creating version bump commit"
+        Invoke-Git @('commit', '-m', "chore: bump version to $Version")
+    } else {
+        Write-WarnLine "No version files changed — skipping stage and commit."
+    }
 
     Write-Info "Creating annotated tag $newTag"
     Invoke-Git @('tag', '-a', $newTag, '-m', $Notes)
