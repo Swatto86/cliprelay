@@ -1270,7 +1270,7 @@ mod windows_client {
                             auto_apply,
                             autostart_enabled,
                             last_error,
-                            history,
+                            history,         // &mut — needed for Clear History
                             runtime_cmd_tx,
                             hotkey_label,
                             toast_message,
@@ -1436,7 +1436,7 @@ mod windows_client {
             auto_apply: &mut bool,
             autostart_enabled: &mut bool,
             last_error: &Option<String>,
-            history: &VecDeque<ActivityEntry>,
+            history: &mut VecDeque<ActivityEntry>,
             runtime_cmd_tx: &mpsc::UnboundedSender<RuntimeCommand>,
             hotkey_label: &mut String,
             toast_message: &mut Option<(String, u64)>,
@@ -1655,7 +1655,20 @@ mod windows_client {
                 ui.separator();
                 ui.add_space(8.0);
 
-                ui.heading("Activity History");
+                ui.horizontal(|ui| {
+                    ui.heading("Activity History");
+                    ui.add_space(4.0);
+                    if !history.is_empty()
+                        && ui
+                            .button("Clear")
+                            .on_hover_text("Remove all activity history entries permanently.")
+                            .clicked()
+                    {
+                        history.clear();
+                        save_history(history);
+                        *toast_message = Some(("Activity history cleared".to_string(), now_unix_ms()));
+                    }
+                });
                 ui.add_space(4.0);
 
                 if history.is_empty() {
