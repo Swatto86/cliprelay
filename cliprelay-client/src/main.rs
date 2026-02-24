@@ -548,6 +548,14 @@ mod windows_client {
         hotkey_label: String,
         // ── Shared visibility state (written by OS callbacks via Win32) ──
         shared_visible: Arc<AtomicBool>,
+        // ── Pending phase-transition requests (set inside render_running) ──
+        /// Set to `true` when the user clicks "Change Room". Handled in
+        /// `update()` after `render_running` returns so that the pattern-match
+        /// borrows on `self.phase` have been released.
+        pending_change_room: bool,
+        /// Set to `true` when the user clicks "Reconnect". Handled in
+        /// `update()` similarly to `pending_change_room`.
+        pending_reconnect: bool,
     }
 
     impl ClipRelayApp {
@@ -574,6 +582,8 @@ mod windows_client {
                 hotkey_toggle_requested: Arc::new(AtomicBool::new(false)),
                 hotkey_label,
                 shared_visible: Arc::new(AtomicBool::new(true)),
+                pending_change_room: false,
+                pending_reconnect: false,
             }
         }
 
@@ -963,6 +973,15 @@ mod windows_client {
 
         #[allow(clippy::too_many_arguments)]
         fn render_running(&mut self, ctx: &egui::Context) {
+            // Phase-transition request flags — declared here (before the
+            // AppPhase::Running borrow) so they can be set inside UI closures
+            // and read back after the last use of the phase-borrowed variables.
+            // Rust's field-level borrowing allows writing to these (and other
+            // `self.*` fields) while `self.phase` is borrowed via the pattern
+            // match below.
+            let mut change_room_requested = false;
+            let mut reconnect_requested = false;
+
             // Pre-bind hotkey_label so the central-panel closure can capture
             // it without borrowing all of `self`.
             let hotkey_label = &mut self.hotkey_label;
@@ -1255,6 +1274,8 @@ mod windows_client {
                             runtime_cmd_tx,
                             hotkey_label,
                             toast_message,
+                            &mut change_room_requested,
+                            &mut reconnect_requested,
                         );
                     }
                     Tab::Notifications => {
@@ -1308,6 +1329,13 @@ mod windows_client {
 
             // Request periodic repaint so we process runtime events even when idle.
             ctx.request_repaint_after(Duration::from_millis(100));
+
+            // ── Signal pending phase-transitions ──────────────────────────────
+            // These write to fields of `self` OTHER than `self.phase`, so
+            // Rust's field-level borrow splitting allows this even while the
+            // AppPhase::Running pattern borrows above are still technically live.
+            self.pending_change_room |= change_room_requested;
+            self.pending_reconnect |= reconnect_requested;
         }
 
         // ─── Send tab ──────────────────────────────────────────────────────────
@@ -1412,6 +1440,12 @@ mod windows_client {
             runtime_cmd_tx: &mpsc::UnboundedSender<RuntimeCommand>,
             hotkey_label: &mut String,
             toast_message: &mut Option<(String, u64)>,
+            // Set to `true` when the user requests a room change (handled by
+            // the caller after phase borrows are released).
+            change_room_requested: &mut bool,
+            // Set to `true` when the user requests a reconnect (handled by
+            // the caller after phase borrows are released).
+            reconnect_requested: &mut bool,
         ) {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.heading("Connection Info");
@@ -1477,6 +1511,80 @@ mod windows_client {
                         format!("Last error: {}", preview_text(err, 200)),
                     );
                 }
+
+                // ── Connected Peers ──────────────────────────────────────────────
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(8.0);
+
+                ui.horizontal(|ui| {
+                    ui.heading("Connected Peers");
+                    if peers.is_empty() {
+                        ui.label(egui::RichText::new("(none)").weak());
+                    } else {
+                        let others = peers
+                            .iter()
+                            .filter(|p| p.device_id != config.device_id)
+                            .count();
+                        if others == 0 {
+                            ui.label(egui::RichText::new("(only you)").weak());
+                        } else {
+                            ui.label(
+                                egui::RichText::new(format!("({others} peer{})", if others == 1 { "" } else { "s" })).weak(),
+                            );
+                        }
+                    }
+                });
+
+                ui.add_space(4.0);
+                let other_peers: Vec<_> = peers
+                    .iter()
+                    .filter(|p| p.device_id != config.device_id)
+                    .collect();
+                if other_peers.is_empty() {
+                    ui.label(
+                        egui::RichText::new("No other peers in this room yet. Waiting for another device to join.")
+                            .weak(),
+                    );
+                } else {
+                    for peer in &other_peers {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("\u{2022}").strong());
+                            ui.label(&peer.device_name);
+                            let id_short = &peer.device_id[..8.min(peer.device_id.len())];
+                            ui.label(
+                                egui::RichText::new(format!("({id_short}\u{2026})"))
+                                    .weak()
+                                    .monospace(),
+                            );
+                        });
+                    }
+                }
+
+                // ── Room / connection actions ────────────────────────────────────
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .button("Reconnect")
+                        .on_hover_text(
+                            "Drop and re-establish the connection to the relay server.\n\
+                             This refreshes the peer list and room key without restarting the app.",
+                        )
+                        .clicked()
+                    {
+                        *reconnect_requested = true;
+                    }
+                    if ui
+                        .button("Change Room\u{2026}")
+                        .on_hover_text(
+                            "Disconnect and return to the room-selection screen\n\
+                             so you can join or create a different room.",
+                        )
+                        .clicked()
+                    {
+                        *change_room_requested = true;
+                    }
+                });
 
                 ui.add_space(12.0);
                 ui.separator();
@@ -1798,6 +1906,45 @@ mod windows_client {
                     // Put it back, render_running will operate on it.
                     self.phase = phase;
                     self.render_running(ctx);
+
+                    // ── Handle pending phase transitions ───────────────────────
+                    // After render_running returns all AppPhase::Running borrows
+                    // are released, so self.phase can be freely reassigned.
+                    if self.pending_change_room {
+                        self.pending_change_room = false;
+                        // Clean up hotkey registration before leaving Running.
+                        if let (Some(old_hk), Some(mgr)) =
+                            (self.hotkey_current.take(), &self.hotkey_manager)
+                        {
+                            let _ = mgr.unregister(old_hk);
+                        }
+                        self.hotkey_manager = None;
+                        // Dropping AppPhase::Running here also drops the
+                        // tokio Runtime, which cancels all background tasks.
+                        let saved_config = load_saved_config().ok().flatten();
+                        info!("change-room requested — returning to ChooseRoom");
+                        self.phase = AppPhase::ChooseRoom { saved_config };
+                    } else if self.pending_reconnect {
+                        self.pending_reconnect = false;
+                        // Unregister current hotkey; start_running will re-register.
+                        if let (Some(old_hk), Some(mgr)) =
+                            (self.hotkey_current.take(), &self.hotkey_manager)
+                        {
+                            let _ = mgr.unregister(old_hk);
+                        }
+                        self.hotkey_manager = None;
+                        self.hotkey_current = None;
+                        // Dropping AppPhase::Running here cancels the old runtime.
+                        match load_saved_config() {
+                            Ok(Some(cfg)) => {
+                                info!("reconnect requested — restarting runtime");
+                                self.start_running(cfg, ctx);
+                            }
+                            _ => {
+                                warn!("reconnect requested but no saved config found");
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1820,11 +1967,19 @@ mod windows_client {
             .unwrap_or_else(|| device_id.to_string())
     }
 
-    fn compute_tray_status(connection_status: &str, room_key_ready: bool) -> TrayStatus {
+    /// Map the raw connection status string to a tray traffic-light colour.
+    ///
+    /// * **Green**  — WebSocket connection to the relay server is active
+    ///                (`"Connected"`), giving the user clear confirmation that
+    ///                the network path is working.  Room-key readiness is a
+    ///                secondary concern shown in the status-bar text and tooltip.
+    /// * **Amber**  — Transitional states: starting, connecting, reconnecting.
+    /// * **Red**    — An error has occurred and the app cannot reach the server.
+    fn compute_tray_status(connection_status: &str, _room_key_ready: bool) -> TrayStatus {
         if connection_status.starts_with("Error") {
             return TrayStatus::Red;
         }
-        if connection_status == "Connected" && room_key_ready {
+        if connection_status == "Connected" {
             return TrayStatus::Green;
         }
         TrayStatus::Amber

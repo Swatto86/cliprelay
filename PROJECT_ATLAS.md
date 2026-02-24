@@ -60,6 +60,18 @@ The quit callback sets a flag and spawns a fallback thread that calls `std::proc
 
 The `TrayIconBuilder` has `menu_on_left_click` explicitly set to `false` so that only right-click shows the context menu (tray-icon defaults to `true`, which causes `TrackPopupMenu` to block on every left-click and prevent the toggle handler from working). Click events are filtered to `MouseButtonState::Up` only to avoid double-toggling when Down and Up messages are dispatched in separate event-loop pump cycles. Global hotkey events are filtered to `Pressed` only (ignoring `Released`) to prevent double-toggle. The global hotkey defaults to Ctrl+Alt+C and can be changed in the Options tab; the setting is persisted in `ui_state.json`. Hotkey registration failures are surfaced to the user via the status bar error display.
 
+### Tray Status Icon Semantics
+- **Green** — WebSocket connection to the relay server is active (`connection_status == "Connected"`). The icon goes green as soon as the TCP/WebSocket handshake succeeds, confirming network reachability. Room-key readiness (which requires another peer to complete the `SaltExchange` handshake) is a secondary detail shown in the status-bar text and tray tooltip.
+- **Amber** — Transitional states: `"Starting"`, `"Connecting"`, `"Reconnecting…"` — the app has not yet established (or has lost) the WebSocket connection.
+- **Red** — An error status prefix `"Error: …"` means the app cannot reach the relay server after retrying.
+
+### Reconnect and Change Room (In-App Room Management)
+The Options tab exposes two session-management actions without requiring an app restart:
+- **Reconnect** — Drops the existing tokio runtime (cancelling all background tasks), unregisters the current global hotkey, then calls `start_running` with the saved config to create a fresh runtime, re-register with the relay, get a fresh `PeerList`/`SaltExchange`, and re-register the hotkey. Useful when peers appear stale or the room key needs refreshing.
+- **Change Room…** — Unregisters the hotkey, drops the `AppPhase::Running` variant (and its tokio runtime), and transitions to `AppPhase::ChooseRoom` using the saved config for the pre-fill. The user can then re-use the same room or configure a new one.
+
+**Implementation pattern** — Both actions are two-phase to avoid Rust borrow conflicts. `render_running` pattern-matches into `AppPhase::Running`, taking mutable references to its fields. Phase reassignment is therefore deferred: local `bool` flags (`change_room_requested`, `reconnect_requested`) are set inside the UI callbacks, written into `self.pending_change_room` / `self.pending_reconnect` (separate struct fields, not part of `self.phase`) at the end of `render_running`, and consumed in `update()` after `render_running` returns and all phase borrows are released.
+
 ## Build/Test/Run
 - Build: `cargo check`
 - Core unit tests: `cargo test -p cliprelay-core`
