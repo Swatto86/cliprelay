@@ -1161,16 +1161,19 @@ mod windows_client {
             if let Some(tray_state) = tray.as_mut() {
                 tray_state.set_status(tray_status);
                 let status_label = match tray_status {
-                    TrayStatus::Red => "red",
-                    TrayStatus::Amber => "amber",
-                    TrayStatus::Green => "green",
+                    TrayStatus::Red => "not connected",
+                    TrayStatus::Amber => "connecting",
+                    TrayStatus::Green => "connected",
                 };
+                let peer_count = peers.len().saturating_sub(1); // exclude self
+                let room_id_short = &config.room_id[..config.room_id.len().min(8)];
                 tray_state.set_tooltip(&format!(
-                    "ClipRelay | {} | peers={} | status={} | room={}",
-                    connection_status,
-                    peers.len(),
+                    "ClipRelay | {} | {} peer{} | {} ({})",
                     status_label,
-                    config.room_id
+                    peer_count,
+                    if peer_count == 1 { "" } else { "s" },
+                    config.room_code,
+                    room_id_short,
                 ));
             }
 
