@@ -22,8 +22,8 @@ mod windows_client {
         io::{self, Write},
         path::{Path, PathBuf},
         sync::{
-            atomic::{AtomicBool, Ordering},
             Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
         },
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
@@ -69,7 +69,7 @@ mod windows_client {
     /// `hwnd` must be a valid window handle obtained from `FindWindowW`.
     unsafe fn win32_set_window_visible(hwnd: isize, visible: bool) {
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            SetForegroundWindow, ShowWindow, SW_HIDE, SW_RESTORE,
+            SW_HIDE, SW_RESTORE, SetForegroundWindow, ShowWindow,
         };
         if visible {
             unsafe {
@@ -409,7 +409,9 @@ mod windows_client {
                     // quit flag cleanly, then force-exit.
                     std::thread::spawn(|| {
                         std::thread::sleep(std::time::Duration::from_millis(500));
-                        eprintln!("[TRAY-DEBUG] quit fallback: event loop did not exit in time, forcing exit");
+                        eprintln!(
+                            "[TRAY-DEBUG] quit fallback: event loop did not exit in time, forcing exit"
+                        );
                         std::process::exit(0);
                     });
                 }
@@ -647,7 +649,9 @@ mod windows_client {
                 FindWindowW(std::ptr::null(), title.as_ptr())
             };
             if eframe_hwnd == 0 {
-                warn!("FindWindowW(\"ClipRelay\") returned NULL — tray/hotkey toggle will be degraded");
+                warn!(
+                    "FindWindowW(\"ClipRelay\") returned NULL — tray/hotkey toggle will be degraded"
+                );
                 eprintln!("[TRAY-DEBUG] FindWindowW returned NULL");
             } else {
                 info!(eframe_hwnd, "eframe window HWND found");
@@ -655,7 +659,8 @@ mod windows_client {
             }
 
             // Shared visibility state — OS callbacks mutate this directly.
-            self.shared_visible.store(!self.args.background, Ordering::SeqCst);
+            self.shared_visible
+                .store(!self.args.background, Ordering::SeqCst);
 
             let tray = TrayState::new(
                 ctx,
@@ -681,9 +686,7 @@ mod windows_client {
                 warn!("GlobalHotKeyManager::new() failed — hotkeys will be unavailable");
                 hotkey_error = Some("Global hotkey system unavailable".to_owned());
             }
-            if let (Some(mgr), Some(hk)) =
-                (&manager, parse_hotkey_label(&self.hotkey_label))
-            {
+            if let (Some(mgr), Some(hk)) = (&manager, parse_hotkey_label(&self.hotkey_label)) {
                 match mgr.register(hk) {
                     Ok(()) => {
                         info!(hotkey = %self.hotkey_label, "global hotkey registered");
@@ -902,15 +905,16 @@ mod windows_client {
                         ui.end_row();
 
                         ui.label("Client Name:");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut device_name).desired_width(300.0),
-                        );
+                        ui.add(egui::TextEdit::singleline(&mut device_name).desired_width(300.0));
                         ui.end_row();
                     });
 
                 ui.add_space(8.0);
                 ui.label(
-                    egui::RichText::new("Tip: Use the same room code on multiple devices to sync clipboards.").weak()
+                    egui::RichText::new(
+                        "Tip: Use the same room code on multiple devices to sync clipboards.",
+                    )
+                    .weak(),
                 );
 
                 if let Some(ref msg) = error_message {
@@ -1048,8 +1052,8 @@ mod windows_client {
                             if let Err(err) = apply_clipboard_text(&text) {
                                 warn!("auto-apply failed: {}", err);
                             } else {
-                                let _ = runtime_cmd_tx
-                                    .send(RuntimeCommand::MarkApplied(content_hash));
+                                let _ =
+                                    runtime_cmd_tx.send(RuntimeCommand::MarkApplied(content_hash));
                                 let name = resolve_peer_name(peers, &sender_device_id);
                                 *toast_message = Some((
                                     format!("Clipboard auto-applied from {name}"),
@@ -1057,17 +1061,18 @@ mod windows_client {
                                 ));
                             }
                         } else {
-                            push_notification(notifications, Notification::Text {
-                                sender_device_id,
-                                preview: preview_text(&text, 450),
-                                full_text: text,
-                                content_hash,
-                            });
+                            push_notification(
+                                notifications,
+                                Notification::Text {
+                                    sender_device_id,
+                                    preview: preview_text(&text, 450),
+                                    full_text: text,
+                                    content_hash,
+                                },
+                            );
                             if *active_tab != Tab::Notifications {
-                                *toast_message = Some((
-                                    "New clipboard received".to_string(),
-                                    now_unix_ms(),
-                                ));
+                                *toast_message =
+                                    Some(("New clipboard received".to_string(), now_unix_ms()));
                             }
                         }
                     }
@@ -1093,17 +1098,17 @@ mod windows_client {
                             "File: {file_name}\nSize: {size_bytes} bytes\n\n\
                              Click Save to store it in Downloads\\ClipRelay."
                         );
-                        push_notification(notifications, Notification::File {
-                            sender_device_id,
-                            preview,
-                            file_name,
-                            temp_path,
-                        });
+                        push_notification(
+                            notifications,
+                            Notification::File {
+                                sender_device_id,
+                                preview,
+                                file_name,
+                                temp_path,
+                            },
+                        );
                         if *active_tab != Tab::Notifications {
-                            *toast_message = Some((
-                                "New file received".to_string(),
-                                now_unix_ms(),
-                            ));
+                            *toast_message = Some(("New file received".to_string(), now_unix_ms()));
                         }
                     }
                     UiEvent::RuntimeError(message) => {
@@ -1165,7 +1170,10 @@ mod windows_client {
                     TrayStatus::Amber => "connecting",
                     TrayStatus::Green => "connected",
                 };
-                let peer_count = peers.len().saturating_sub(1); // exclude self
+                let peer_count = peers
+                    .iter()
+                    .filter(|p| p.device_id != config.device_id)
+                    .count();
                 let room_id_short = &config.room_id[..config.room_id.len().min(8)];
                 tray_state.set_tooltip(&format!(
                     "ClipRelay | {} | {} peer{} | {} ({})",
@@ -1217,8 +1225,7 @@ mod windows_client {
                     };
                     let (rect, _) =
                         ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-                    ui.painter()
-                        .circle_filled(rect.center(), 6.0, color);
+                    ui.painter().circle_filled(rect.center(), 6.0, color);
 
                     let room_key_text = if *room_key_ready {
                         "ready"
@@ -1273,7 +1280,7 @@ mod windows_client {
                             auto_apply,
                             autostart_enabled,
                             last_error,
-                            history,         // &mut — needed for Clear History
+                            history, // &mut — needed for Clear History
                             runtime_cmd_tx,
                             hotkey_label,
                             toast_message,
@@ -1367,8 +1374,7 @@ mod windows_client {
             ui.horizontal(|ui| {
                 let input_ok =
                     !send_text.trim().is_empty() && send_text.len() <= MAX_CLIPBOARD_TEXT_BYTES;
-                let can_send =
-                    connection_status == "Connected" && room_key_ready && input_ok;
+                let can_send = connection_status == "Connected" && room_key_ready && input_ok;
 
                 if ui
                     .add_enabled(can_send, egui::Button::new("Send Text"))
@@ -1392,14 +1398,12 @@ mod windows_client {
                     *toast_message = Some(("Sent to connected devices".to_string(), now_unix_ms()));
                 }
 
-                let can_send_file =
-                    connection_status == "Connected" && room_key_ready;
+                let can_send_file = connection_status == "Connected" && room_key_ready;
 
                 if ui
                     .add_enabled(can_send_file, egui::Button::new("Send File…"))
                     .clicked()
-                {
-                    if let Some(path) = rfd::FileDialog::new()
+                    && let Some(path) = rfd::FileDialog::new()
                         .set_title("Select file to send")
                         .pick_file()
                     {
@@ -1416,12 +1420,9 @@ mod windows_client {
                         save_history(history);
 
                         let _ = runtime_cmd_tx.send(RuntimeCommand::SendFile(path.clone()));
-                        *toast_message = Some((
-                            format!("Queued file: {}", path.display()),
-                            now_unix_ms(),
-                        ));
+                        *toast_message =
+                            Some((format!("Queued file: {}", path.display()), now_unix_ms()));
                     }
-                }
             });
         }
 
@@ -1533,7 +1534,11 @@ mod windows_client {
                             ui.label(egui::RichText::new("(only you)").weak());
                         } else {
                             ui.label(
-                                egui::RichText::new(format!("({others} peer{})", if others == 1 { "" } else { "s" })).weak(),
+                                egui::RichText::new(format!(
+                                    "({others} peer{})",
+                                    if others == 1 { "" } else { "s" }
+                                ))
+                                .weak(),
                             );
                         }
                     }
@@ -1546,8 +1551,10 @@ mod windows_client {
                     .collect();
                 if other_peers.is_empty() {
                     ui.label(
-                        egui::RichText::new("No other peers in this room yet. Waiting for another device to join.")
-                            .weak(),
+                        egui::RichText::new(
+                            "No other peers in this room yet. Waiting for another device to join.",
+                        )
+                        .weak(),
                     );
                 } else {
                     for peer in &other_peers {
@@ -1596,8 +1603,7 @@ mod windows_client {
                 let prev_auto = *auto_apply;
                 ui.checkbox(auto_apply, "Automatically apply incoming clipboard changes");
                 if *auto_apply != prev_auto {
-                    let _ =
-                        runtime_cmd_tx.send(RuntimeCommand::SetAutoApply(*auto_apply));
+                    let _ = runtime_cmd_tx.send(RuntimeCommand::SetAutoApply(*auto_apply));
                     *toast_message = Some((
                         if *auto_apply {
                             "Auto-apply enabled".to_string()
@@ -1669,7 +1675,8 @@ mod windows_client {
                     {
                         history.clear();
                         save_history(history);
-                        *toast_message = Some(("Activity history cleared".to_string(), now_unix_ms()));
+                        *toast_message =
+                            Some(("Activity history cleared".to_string(), now_unix_ms()));
                     }
                 });
                 ui.add_space(4.0);
@@ -1684,11 +1691,10 @@ mod windows_client {
                         };
                         let ts = format_timestamp_local(entry.ts_unix_ms);
                         ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(format!("{}.", idx + 1)).weak());
                             ui.label(
-                                egui::RichText::new(format!("{}.", idx + 1)).weak(),
-                            );
-                            ui.label(
-                                egui::RichText::new(format!("[{}] {} {}", ts, dir, entry.kind)).strong()
+                                egui::RichText::new(format!("[{}] {} {}", ts, dir, entry.kind))
+                                    .strong(),
                             );
                         });
                         ui.indent(format!("hist_{idx}"), |ui| {
@@ -1824,26 +1830,23 @@ mod windows_client {
                                 file_name,
                                 temp_path,
                                 ..
-                            } => {
-                                match save_temp_file_to_downloads(&temp_path, &file_name) {
-                                    Ok(dest) => {
-                                        let _ = std::fs::remove_file(&temp_path);
-                                        let name =
-                                            resolve_peer_name(peers, &sender_device_id);
-                                        *toast_message = Some((
-                                            format!("Saved file from {name} to {}", dest.display()),
-                                            now_unix_ms(),
-                                        ));
-                                    }
-                                    Err(err) => {
-                                        warn!("save file failed: {err}");
-                                        *toast_message = Some((
-                                            "Failed to save received file".to_string(),
-                                            now_unix_ms(),
-                                        ));
-                                    }
+                            } => match save_temp_file_to_downloads(&temp_path, &file_name) {
+                                Ok(dest) => {
+                                    let _ = std::fs::remove_file(&temp_path);
+                                    let name = resolve_peer_name(peers, &sender_device_id);
+                                    *toast_message = Some((
+                                        format!("Saved file from {name} to {}", dest.display()),
+                                        now_unix_ms(),
+                                    ));
                                 }
-                            }
+                                Err(err) => {
+                                    warn!("save file failed: {err}");
+                                    *toast_message = Some((
+                                        "Failed to save received file".to_string(),
+                                        now_unix_ms(),
+                                    ));
+                                }
+                            },
                         }
                     }
                 }
@@ -1888,12 +1891,8 @@ mod windows_client {
             }
 
             // Take the current phase to avoid borrow issues.
-            let phase = std::mem::replace(
-                &mut self.phase,
-                AppPhase::ChooseRoom {
-                    saved_config: None,
-                },
-            );
+            let phase =
+                std::mem::replace(&mut self.phase, AppPhase::ChooseRoom { saved_config: None });
 
             match phase {
                 AppPhase::ChooseRoom { saved_config } => {
@@ -2062,10 +2061,7 @@ mod windows_client {
     }
 
     impl RepaintingSender {
-        fn send(
-            &self,
-            event: UiEvent,
-        ) -> Result<(), std::sync::mpsc::SendError<UiEvent>> {
+        fn send(&self, event: UiEvent) -> Result<(), std::sync::mpsc::SendError<UiEvent>> {
             let result = self.tx.send(event);
             self.ctx.request_repaint();
             result
@@ -2160,9 +2156,7 @@ mod windows_client {
                 Ok(url) => {
                     let scheme = url.scheme();
                     if scheme != "ws" && scheme != "wss" {
-                        errors.push(
-                            "Server URL must start with ws:// or wss://.".to_string(),
-                        );
+                        errors.push("Server URL must start with ws:// or wss://.".to_string());
                     }
                 }
                 Err(err) => errors.push(format!("Server URL is invalid: {err}")),
@@ -2282,11 +2276,8 @@ mod windows_client {
                 let mut st_local = st_utc;
                 let ok = unsafe {
                     FileTimeToSystemTime(&ft_utc, &mut st_utc) != 0
-                        && SystemTimeToTzSpecificLocalTime(
-                            std::ptr::null(),
-                            &st_utc,
-                            &mut st_local,
-                        ) != 0
+                        && SystemTimeToTzSpecificLocalTime(std::ptr::null(), &st_utc, &mut st_local)
+                            != 0
                 };
                 if ok {
                     return format!(
@@ -2458,9 +2449,7 @@ mod windows_client {
         // that eprintln! output from OS callbacks is visible for diagnostics.
         // This is a no-op when a console is already attached (launched from
         // PowerShell etc.).
-        if std::env::var_os("CLIPRELAY_DEBUG").is_some()
-            || std::env::var_os("RUST_LOG").is_some()
-        {
+        if std::env::var_os("CLIPRELAY_DEBUG").is_some() || std::env::var_os("RUST_LOG").is_some() {
             unsafe {
                 // windows_sys re-exports kernel32 AllocConsole.
                 windows_sys::Win32::System::Console::AllocConsole();
@@ -2550,9 +2539,7 @@ mod windows_client {
 
         if let Err(err) = Url::parse(&config.server_url) {
             error!(server_url = %config.server_url, "invalid server url: {err}");
-            let _ = ui_event_tx.send(UiEvent::RuntimeError(format!(
-                "invalid server URL: {err}"
-            )));
+            let _ = ui_event_tx.send(UiEvent::RuntimeError(format!("invalid server URL: {err}")));
             return;
         }
 
@@ -2574,8 +2561,7 @@ mod windows_client {
             }
             let _ = ui_event_tx.send(UiEvent::RoomKeyReady(false));
             let _ = ui_event_tx.send(UiEvent::Peers(Vec::new()));
-            let _ =
-                ui_event_tx.send(UiEvent::ConnectionStatus("Reconnecting…".to_owned()));
+            let _ = ui_event_tx.send(UiEvent::ConnectionStatus("Reconnecting…".to_owned()));
 
             info!(
                 delay_secs = RECONNECT_DELAY.as_secs(),
@@ -2613,8 +2599,7 @@ mod windows_client {
                         }
                     }
                     Err(_) => {
-                        let msg =
-                            format!("connect timed out after {CONNECT_TIMEOUT:?}");
+                        let msg = format!("connect timed out after {CONNECT_TIMEOUT:?}");
                         error!(attempt, "{msg}");
                         if attempt >= MAX_CONNECT_ATTEMPTS {
                             let _ = ui_event_tx.send(UiEvent::RuntimeError(msg));
@@ -2645,8 +2630,7 @@ mod windows_client {
 
         if network_send_tx.send(WireMessage::Control(hello)).is_err() {
             error!("failed to queue hello");
-            let _ = ui_event_tx
-                .send(UiEvent::RuntimeError("failed to queue hello".to_owned()));
+            let _ = ui_event_tx.send(UiEvent::RuntimeError("failed to queue hello".to_owned()));
             return;
         }
 
@@ -2702,8 +2686,7 @@ mod windows_client {
                         ));
                         continue;
                     }
-                    let room_key =
-                        shared_state.room_key.lock().ok().and_then(|lock| *lock);
+                    let room_key = shared_state.room_key.lock().ok().and_then(|lock| *lock);
                     let room_key = match room_key {
                         Some(key) => key,
                         None => {
@@ -2728,9 +2711,8 @@ mod windows_client {
                             persist_last_counter(config, *counter);
                         }
                         Err(err) => {
-                            let _ = ui_event_tx.send(UiEvent::RuntimeError(format!(
-                                "encryption failed: {err}"
-                            )));
+                            let _ = ui_event_tx
+                                .send(UiEvent::RuntimeError(format!("encryption failed: {err}")));
                         }
                     }
                 }
@@ -2745,9 +2727,8 @@ mod windows_client {
                     )
                     .await
                     {
-                        let _ = ui_event_tx.send(UiEvent::RuntimeError(format!(
-                            "send file failed: {err}"
-                        )));
+                        let _ = ui_event_tx
+                            .send(UiEvent::RuntimeError(format!("send file failed: {err}")));
                     } else {
                         persist_last_counter(config, *counter);
                     }
@@ -2836,8 +2817,7 @@ mod windows_client {
             let message = match next {
                 Ok(msg) => msg,
                 Err(err) => {
-                    let _ = ui_event_tx
-                        .send(UiEvent::RuntimeError(format!("read failed: {err}")));
+                    let _ = ui_event_tx.send(UiEvent::RuntimeError(format!("read failed: {err}")));
                     break;
                 }
             };
@@ -2867,8 +2847,7 @@ mod windows_client {
                             warn!("replay rejected: {err}");
                             continue;
                         }
-                        let maybe_key =
-                            shared_state.room_key.lock().ok().and_then(|lock| *lock);
+                        let maybe_key = shared_state.room_key.lock().ok().and_then(|lock| *lock);
                         let room_key = match maybe_key {
                             Some(key) => key,
                             None => {
@@ -2948,28 +2927,24 @@ mod windows_client {
                     for peer in peer_list.peers {
                         peers.insert(peer.device_id.clone(), peer);
                     }
-                    let _ = ui_event_tx
-                        .send(UiEvent::Peers(peers.values().cloned().collect()));
+                    let _ = ui_event_tx.send(UiEvent::Peers(peers.values().cloned().collect()));
                 }
                 ControlMessage::PeerJoined(joined) => {
                     peers.insert(joined.peer.device_id.clone(), joined.peer);
-                    let _ = ui_event_tx
-                        .send(UiEvent::Peers(peers.values().cloned().collect()));
+                    let _ = ui_event_tx.send(UiEvent::Peers(peers.values().cloned().collect()));
                 }
                 ControlMessage::PeerLeft(left) => {
                     peers.remove(&left.device_id);
-                    let _ = ui_event_tx
-                        .send(UiEvent::Peers(peers.values().cloned().collect()));
+                    let _ = ui_event_tx.send(UiEvent::Peers(peers.values().cloned().collect()));
                 }
                 ControlMessage::SaltExchange(exchange) => {
-                    let room_key =
-                        match derive_room_key(&config.room_code, &exchange.device_ids) {
-                            Ok(key) => key,
-                            Err(err) => {
-                                warn!("room key derivation failed: {err}");
-                                continue;
-                            }
-                        };
+                    let room_key = match derive_room_key(&config.room_code, &exchange.device_ids) {
+                        Ok(key) => key,
+                        Err(err) => {
+                            warn!("room key derivation failed: {err}");
+                            continue;
+                        }
+                    };
                     if let Ok(mut key_slot) = shared_state.room_key.lock() {
                         *key_slot = Some(room_key);
                     }
@@ -3125,8 +3100,7 @@ mod windows_client {
         static TRANSFERS: OnceLock<Mutex<HashMap<String, InflightTransfer>>> = OnceLock::new();
         let transfers = TRANSFERS.get_or_init(|| Mutex::new(HashMap::new()));
 
-        let env: FileChunkEnvelope =
-            serde_json::from_str(text_utf8).map_err(|e| e.to_string())?;
+        let env: FileChunkEnvelope = serde_json::from_str(text_utf8).map_err(|e| e.to_string())?;
         if env.transfer_id.trim().is_empty()
             || env.total_chunks == 0
             || env.total_chunks > MAX_TOTAL_CHUNKS
@@ -3372,35 +3346,38 @@ mod windows_client {
     fn configure_egui_style(ctx: &egui::Context) {
         // Configure fonts for better Unicode glyph coverage
         let mut fonts = egui::FontDefinitions::default();
-        
+
         // On Windows, load Segoe UI which has excellent glyph coverage
         #[cfg(target_os = "windows")]
         {
-            use egui::{FontFamily, FontData};
-            
+            use egui::{FontData, FontFamily};
+
             // Try to load Segoe UI from Windows system fonts directory
             let font_path = std::path::PathBuf::from("C:\\Windows\\Fonts\\segoeui.ttf");
             if let Ok(font_data) = std::fs::read(&font_path) {
-                fonts.font_data.insert(
-                    "SegoeUI".to_owned(),
-                    FontData::from_owned(font_data)
-                );
-                
+                fonts
+                    .font_data
+                    .insert("SegoeUI".to_owned(), FontData::from_owned(font_data));
+
                 // Add Segoe UI as the primary proportional font
-                fonts.families.get_mut(&FontFamily::Proportional)
+                fonts
+                    .families
+                    .get_mut(&FontFamily::Proportional)
                     .unwrap()
                     .insert(0, "SegoeUI".to_owned());
-                
+
                 // Add it to monospace as well for consistency
-                fonts.families.get_mut(&FontFamily::Monospace)
+                fonts
+                    .families
+                    .get_mut(&FontFamily::Monospace)
                     .unwrap()
                     .insert(0, "SegoeUI".to_owned());
             }
             // If loading fails, fall back to egui's default fonts (silently)
         }
-        
+
         ctx.set_fonts(fonts);
-        
+
         let mut style = (*ctx.style()).clone();
         style.spacing.item_spacing = egui::vec2(8.0, 6.0);
         style.spacing.button_padding = egui::vec2(14.0, 6.0);
