@@ -209,7 +209,7 @@ pub mod autostart {
 
         #[test]
         fn autostart_command_quotes_and_background() {
-            let p = std::path::PathBuf::from(r"C:\Program Files\ClipRelay\cliprelay-client.exe");
+            let p = std::path::PathBuf::from(r"C:\Program Files\ClipRelay\ClipRelay.exe");
             let cmd = autostart_command(&p);
             assert!(cmd.starts_with('"'));
             assert!(cmd.contains("\" --background"));

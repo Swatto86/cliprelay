@@ -149,7 +149,7 @@ Background mode:
 Options tab:
 
 - Auto apply (when enabled, incoming text is applied automatically without needing to visit Notifications)
-- Start with Windows (adds/removes a per-user startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that launches `"cliprelay-client.exe" --background`; implemented via WinAPI registry calls)
+- Start with Windows (adds/removes a per-user startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that launches `"ClipRelay.exe" --background`; implemented via WinAPI registry calls)
 - Activity history (recent sent/received items)
 
 ## 7) Sending Mode (Manual Only)

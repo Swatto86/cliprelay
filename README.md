@@ -63,7 +63,7 @@ cargo test -p cliprelay-client
 ## CI / CD
 
 - **CI** (`.github/workflows/ci.yml`): Runs on push to `main` and PRs — `cargo check` + tests.
-- **Release** (`.github/workflows/release.yml`): Triggered by `v*.*.*` tags — builds `cliprelay-relay` (Linux) and `cliprelay-client.exe` (Windows) and attaches them to the GitHub release.
+- **Release** (`.github/workflows/release.yml`): Triggered by `v*.*.*` tags -- builds `cliprelay-relay` (Linux) and `ClipRelay.exe` (Windows) and attaches them to the GitHub release.
 - **Local release script** (`update-application.ps1`): Bumps version, builds, tests, commits, tags, pushes, and prunes old releases. Supports `-DryRun`.
 
 ---

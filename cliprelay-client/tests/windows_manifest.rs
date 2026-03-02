@@ -40,7 +40,7 @@ fn release_exe_embeds_common_controls_v6_manifest() {
 
     assert!(status.success(), "cargo build failed: {status}");
 
-    let exe_path = target_dir.join("release").join("cliprelay-client.exe");
+    let exe_path = target_dir.join("release").join("ClipRelay.exe");
     assert!(exe_path.exists(), "exe not found at {}", exe_path.display());
 
     let manifest_text = load_exe_manifest(&exe_path)

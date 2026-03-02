@@ -6,7 +6,7 @@ license.workspace = true
 build = "build.rs"
 
 [[bin]]
-name = "cliprelay-client"
+name = "ClipRelay"
 path = "src/main.rs"
 test = false
 bench = false

@@ -26,7 +26,7 @@ ClipRelay synchronizes clipboard text across online devices in a shared room usi
 - `cliprelay-client/assets/app-icon-circle-c.ico`: client icon used for tray + executable resources.
 - `cliprelay-client/build.rs`: Windows resource embedding (icon via winres, manifest via MSVC linker) ensuring taskbar icon and Common Controls v6 support.
 - `cliprelay-client/tests/ui_state.rs`: regression tests for window placement persistence helpers.
-- `cliprelay-client/tests/windows_manifest.rs`: verifies the release binary embeds the Win32 manifest.
+- `cliprelay-client/tests/windows_manifest.rs`: verifies the release binary (`ClipRelay.exe`) embeds the Win32 manifest.
 - `update-application.ps1`: release automation script (version bump, quality-gate sequence: fmt-check -> clippy -> full tests, commit, tagging, push, old-tag cleanup) with `-DryRun` preview mode and `-Force` override.
 - `docs/HOW_IT_WORKS.md`: end-to-end architecture + user guide + cloud ops notes (Caddy + systemd).
 - `deploy/cliprelay-relay.service`: systemd unit for running the relay on Linux hosts.
@@ -113,7 +113,7 @@ Recommended for diagnostics:
 ```powershell
 $env:RUST_LOG = "trace"
 $env:CLIPRELAY_DEBUG = "1"
-.\cliprelay-client.exe
+.\ ClipRelay.exe
 ```
 
 Log file location: `%LOCALAPPDATA%\ClipRelay\cliprelay-client.log`

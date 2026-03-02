@@ -54,7 +54,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cliprelay-client-windows-x64
-          path: target/release/cliprelay-client.exe
+          path: target/release/ClipRelay.exe
 
   publish-release:
     name: Publish GitHub release
@@ -74,4 +74,4 @@ jobs:
         with:
           files: |
             release-artifacts/cliprelay-relay-linux-x64/cliprelay-relay
-            release-artifacts/cliprelay-client-windows-x64/cliprelay-client.exe
+            release-artifacts/cliprelay-client-windows-x64/ClipRelay.exe

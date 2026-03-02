@@ -114,14 +114,14 @@ When you launch the Windows client **without** a `--room-code` CLI argument, you
 ### Test Room Choice Dialog
 ```powershell
 # Launch without arguments to see room choice
-.\target\release\cliprelay-client.exe
+.\target\release\ClipRelay.exe
 ```
 
 ### Test File Sending  
 ```powershell
 # Launch two clients with same room code
-.\target\release\cliprelay-client.exe --room-code test-files --device-name PC1
-.\target\release\cliprelay-client.exe --room-code test-files --device-name PC2
+.\target\release\ClipRelay.exe --room-code test-files --device-name PC1
+.\target\release\ClipRelay.exe --room-code test-files --device-name PC2
 
 # Wait for both to show GREEN tray icon
 # On PC1: Double-click tray → "Send File..." → Choose file ≤5MB

@@ -18,8 +18,8 @@ fn main() {
     res.set("CompanyName", "Swatto");
     res.set("ProductName", "ClipRelay");
     res.set("FileDescription", "ClipRelay Client");
-    res.set("InternalName", "cliprelay-client");
-    res.set("OriginalFilename", "cliprelay-client.exe");
+    res.set("InternalName", "ClipRelay");
+    res.set("OriginalFilename", "ClipRelay.exe");
 
     if let Err(e) = res.compile() {
         eprintln!("Warning: icon embedding failed: {}", e);
@@ -28,9 +28,9 @@ fn main() {
     // Embed manifest via MSVC linker (requires MSVC toolchain)
     // This is critical for Common Controls v6
     let manifest_abs = std::env::current_dir().unwrap().join(manifest_path);
-    println!("cargo:rustc-link-arg-bin=cliprelay-client=/MANIFEST:EMBED");
+    println!("cargo:rustc-link-arg-bin=ClipRelay=/MANIFEST:EMBED");
     println!(
-        "cargo:rustc-link-arg-bin=cliprelay-client=/MANIFESTINPUT:{}",
+        "cargo:rustc-link-arg-bin=ClipRelay=/MANIFESTINPUT:{}",
         manifest_abs.display()
     );
 }
