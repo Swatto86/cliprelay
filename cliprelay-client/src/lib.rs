@@ -166,16 +166,18 @@ pub mod autostart {
         let bytes: &[u8] =
             unsafe { std::slice::from_raw_parts(value_w.as_ptr() as *const u8, value_w.len() * 2) };
 
-        let status = unsafe {
-            RegSetValueExW(
-                key,
-                name_w.as_ptr(),
-                0,
-                REG_SZ,
-                bytes.as_ptr(),
-                u32::try_from(bytes.len()).map_err(|_| AutostartError::ValueTooLarge)?,
-            )
-        };
+        // Validate the byte length BEFORE entering the unsafe RegSetValueExW call.
+        // If the value is unreasonably large, close the key and return the error
+        // immediately — the previous code embedded the try_from inside the unsafe
+        // block's argument list, which meant the early-return via `?` bypassed
+        // the `RegCloseKey` call below and leaked the handle.
+        let byte_len = u32::try_from(bytes.len()).map_err(|_| {
+            unsafe { RegCloseKey(key) };
+            AutostartError::ValueTooLarge
+        })?;
+
+        let status =
+            unsafe { RegSetValueExW(key, name_w.as_ptr(), 0, REG_SZ, bytes.as_ptr(), byte_len) };
         unsafe { RegCloseKey(key) };
         if status != 0 {
             return Err(AutostartError::RegSet { status });

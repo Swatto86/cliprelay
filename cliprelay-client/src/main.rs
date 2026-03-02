@@ -260,9 +260,9 @@ mod windows_client {
             let result: Result<(), String> = (|| {
                 std::fs::write(&tmp, payload.as_bytes())
                     .map_err(|e| format!("write {}: {e}", tmp.display()))?;
-                if path.exists() {
-                    let _ = std::fs::remove_file(&path);
-                }
+                // Atomic replacement — MoveFileExW(MOVEFILE_REPLACE_EXISTING) on
+                // Windows.  Do NOT remove the destination first; that creates a
+                // gap where neither file exists and the state is lost on crash.
                 std::fs::rename(&tmp, &path)
                     .map_err(|e| format!("rename {}: {e}", path.display()))?;
                 Ok(())
@@ -555,6 +555,10 @@ mod windows_client {
         hotkey_label: String,
         // ── Shared visibility state (written by OS callbacks via Win32) ──
         shared_visible: Arc<AtomicBool>,
+        // ── Keepalive thread stop signal ────────────────────────────────
+        /// Set to `true` to ask the current `eframe-keepalive` thread to exit
+        /// before spawning a new one during reconnects / room changes.
+        keepalive_stop: Arc<AtomicBool>,
         // ── Pending phase-transition requests (set inside render_running) ──
         /// Set to `true` when the user clicks "Change Room". Handled in
         /// `update()` after `render_running` returns so that the pattern-match
@@ -589,6 +593,7 @@ mod windows_client {
                 hotkey_toggle_requested: Arc::new(AtomicBool::new(false)),
                 hotkey_label,
                 shared_visible: Arc::new(AtomicBool::new(true)),
+                keepalive_stop: Arc::new(AtomicBool::new(false)),
                 pending_change_room: false,
                 pending_reconnect: false,
             }
@@ -746,12 +751,19 @@ mod windows_client {
             // is called from OS callbacks.  Spawn a dedicated thread that
             // periodically wakes the event loop so tray/hotkey flags are
             // always processed promptly.
+            //
+            // Stop the previous keepalive thread (if any) before spawning a
+            // new one.  Without this, every reconnect / room-change leaves an
+            // immortal thread behind that calls `request_repaint()` forever.
             {
+                self.keepalive_stop.store(true, Ordering::SeqCst);
+                let new_stop = Arc::new(AtomicBool::new(false));
+                self.keepalive_stop = new_stop.clone();
                 let ctx_keepalive = ctx.clone();
                 std::thread::Builder::new()
                     .name("eframe-keepalive".into())
                     .spawn(move || {
-                        loop {
+                        while !new_stop.load(Ordering::SeqCst) {
                             std::thread::sleep(Duration::from_millis(200));
                             ctx_keepalive.request_repaint();
                         }
@@ -783,6 +795,11 @@ mod windows_client {
 
             if self.args.background {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            } else {
+                // When the viewport was constructed with `with_visible(false)`
+                // (e.g. `--room-code` passed on the CLI without `--background`),
+                // the window stays hidden unless we explicitly show it here.
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             }
         }
 
@@ -1974,7 +1991,13 @@ mod windows_client {
 
     fn push_notification(notifications: &mut Vec<Notification>, n: Notification) {
         if notifications.len() >= MAX_NOTIFICATIONS {
-            notifications.remove(0);
+            // Evict the oldest notification.  If it is a File notification,
+            // delete its temp file now — otherwise it leaks on disk until the
+            // next app restart.
+            let evicted = notifications.remove(0);
+            if let Notification::File { temp_path, .. } = evicted {
+                let _ = std::fs::remove_file(&temp_path);
+            }
         }
         notifications.push(n);
     }
@@ -1989,17 +2012,20 @@ mod windows_client {
 
     /// Map the raw connection status string to a tray traffic-light colour.
     ///
-    /// * **Green** -- WebSocket connection to the relay server is active
-    ///   (`"Connected"`), giving the user clear confirmation that the network
-    ///   path is working. Room-key readiness is a secondary concern shown in
-    ///   the status-bar text and tooltip.
-    /// * **Amber** -- Transitional states: starting, connecting, reconnecting.
+    /// * **Green** -- WebSocket is connected AND the room key has been
+    ///   derived (i.e. at least one peer is present and `SaltExchange` was
+    ///   processed).  This is the only state where clipboard sync is fully
+    ///   operational.
+    /// * **Amber** -- Transitional states: starting, connecting, reconnecting,
+    ///   or connected-but-key-not-yet-ready (waiting for a second peer).
     /// * **Red** -- An error has occurred and the app cannot reach the server.
-    fn compute_tray_status(connection_status: &str, _room_key_ready: bool) -> TrayStatus {
+    fn compute_tray_status(connection_status: &str, room_key_ready: bool) -> TrayStatus {
         if connection_status.starts_with("Error") {
             return TrayStatus::Red;
         }
-        if connection_status == "Connected" {
+        // Only go green once the room key is ready; showing green before that
+        // would be misleading — messages cannot be encrypted/decrypted yet.
+        if connection_status == "Connected" && room_key_ready {
             return TrayStatus::Green;
         }
         TrayStatus::Amber
@@ -2090,9 +2116,24 @@ mod windows_client {
     }
 
     fn load_saved_config() -> Result<Option<SavedClientConfig>, String> {
+        /// Defensive upper bound: the config JSON is tiny; reject anything that
+        /// cannot plausibly be a valid config file to guard against OOM if the
+        /// file on disk is corrupted or replaced with a huge decoy.
+        const MAX_CONFIG_BYTES: u64 = 64 * 1024;
+
         let path = client_config_path();
         if !path.exists() {
             return Ok(None);
+        }
+        let meta = std::fs::metadata(&path)
+            .map_err(|err| format!("failed to read config metadata {}: {err}", path.display()))?;
+        if meta.len() > MAX_CONFIG_BYTES {
+            return Err(format!(
+                "config file is too large ({} bytes; max {}): {}",
+                meta.len(),
+                MAX_CONFIG_BYTES,
+                path.display()
+            ));
         }
         let data = std::fs::read_to_string(&path)
             .map_err(|err| format!("failed to read config {}: {err}", path.display()))?;
@@ -2114,9 +2155,9 @@ mod windows_client {
             let result: Result<(), String> = (|| {
                 std::fs::write(&tmp_path, payload.as_bytes())
                     .map_err(|err| format!("write {}: {err}", tmp_path.display()))?;
-                if path.exists() {
-                    let _ = std::fs::remove_file(&path);
-                }
+                // Atomic replacement — MoveFileExW(MOVEFILE_REPLACE_EXISTING) on
+                // Windows.  Do NOT remove the destination first; that creates a
+                // gap where neither file exists and the state is lost on crash.
                 std::fs::rename(&tmp_path, &path)
                     .map_err(|err| format!("rename {}: {err}", path.display()))?;
                 Ok(())
@@ -3165,16 +3206,31 @@ mod windows_client {
             return Ok(None);
         }
 
-        let temp_path = write_incoming_temp_file(&entry.file_name, &out)?;
-        let completed = CompletedFile {
-            sender_device_id: entry.sender_device_id.clone(),
-            file_name: entry.file_name.clone(),
-            temp_path,
-            size_bytes: entry.total_size,
+        // Extract the fields we need for the result, then remove the entry
+        // from the map and drop the lock BEFORE writing the temp file.
+        //
+        // Previous code wrote the file while holding the lock, which:
+        //   (a) blocked all other incoming chunks for the entire write duration, and
+        //   (b) left the entry in the map if `write_incoming_temp_file` failed,
+        //       holding up to `total_size` bytes until the TRANSFER_TIMEOUT_MS
+        //       expiry (120 s).
+        let transfer_key = format!("{}:{}", sender_device_id, env.transfer_id);
+        let (sender_id, file_name, total_size) = {
+            let e = guard.remove(&transfer_key);
+            match e {
+                Some(t) => (t.sender_device_id, t.file_name, t.total_size),
+                None => return Ok(None), // already removed (shouldn't happen)
+            }
         };
-        let completed_key = format!("{}:{}", completed.sender_device_id, env.transfer_id);
-        guard.remove(&completed_key);
-        Ok(Some(completed))
+        drop(guard); // release the mutex before I/O
+
+        let temp_path = write_incoming_temp_file(&file_name, &out)?;
+        Ok(Some(CompletedFile {
+            sender_device_id: sender_id,
+            file_name,
+            temp_path,
+            size_bytes: total_size,
+        }))
     }
 
     // ─── Entry point ───────────────────────────────────────────────────────────

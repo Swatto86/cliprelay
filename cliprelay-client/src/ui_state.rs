@@ -127,11 +127,10 @@ pub fn save_ui_state_to_path(path: &Path, state: &SavedUiState) -> Result<(), Ui
     let tmp = path.with_extension("json.tmp");
     let payload = serde_json::to_string_pretty(state).map_err(UiStateSaveError::Serialize)?;
     fs::write(&tmp, payload.as_bytes()).map_err(UiStateSaveError::WriteTmp)?;
-
-    if path.exists() {
-        let _ = fs::remove_file(path);
-    }
-
+    // `fs::rename` on Windows calls MoveFileExW(MOVEFILE_REPLACE_EXISTING), which
+    // atomically replaces the destination.  The explicit remove_file + rename
+    // two-step that was here before created a window where *no* file existed;
+    // if the process died between the two calls the persisted state was lost.
     fs::rename(&tmp, path).map_err(UiStateSaveError::Rename)?;
     Ok(())
 }
