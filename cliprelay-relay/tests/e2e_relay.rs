@@ -1,5 +1,22 @@
 use std::time::Duration;
 
+// ── Test timeout constants ─────────────────────────────────────────────────
+//
+// All timeouts are sized conservatively for cold CI runners (shared CPU) at
+// minimum 5x the worst-case local dev time — per Rule 3 of the AI Operating
+// Contract.
+//
+// RECV_TIMEOUT: how long to wait for a message that IS expected to arrive.
+//   Local worst-case: ~200 ms.  5x = 1 s.  We use 5 s for safety margin.
+// NO_RECV_TIMEOUT: how long to wait to confirm a message is NOT forwarded.
+//   Must be long enough to catch a relay bug, but short enough not to slow CI.
+// DRAIN_TIMEOUT: per-message poll during the initial drain of control frames.
+// OVERFLOW_SETTLE: sleep after the overflow client connects before assertions.
+const RECV_TIMEOUT: Duration = Duration::from_secs(5);
+const NO_RECV_TIMEOUT: Duration = Duration::from_millis(500);
+const DRAIN_TIMEOUT: Duration = Duration::from_millis(120);
+const OVERFLOW_SETTLE: Duration = Duration::from_millis(200);
+
 use cliprelay_core::{
     ControlMessage, EncryptedPayload, Hello, MAX_DEVICES_PER_ROOM, PeerInfo, WireMessage,
     decode_frame, encode_frame,
@@ -41,12 +58,12 @@ async fn encrypted_payload_is_forwarded_to_other_peers_only() {
         .await
         .expect("send encrypted payload");
 
-    let received_b = recv_encrypted_payload(&mut client_b, Duration::from_secs(2))
+    let received_b = recv_encrypted_payload(&mut client_b, RECV_TIMEOUT)
         .await
         .expect("client B receives payload");
     assert_eq!(received_b, payload);
 
-    let received_a = recv_encrypted_payload(&mut client_a, Duration::from_millis(400)).await;
+    let received_a = recv_encrypted_payload(&mut client_a, NO_RECV_TIMEOUT).await;
     assert!(
         received_a.is_none(),
         "sender client unexpectedly received its own encrypted payload"
@@ -72,7 +89,7 @@ async fn oversized_binary_frame_is_dropped_and_not_forwarded() {
         .await
         .expect("send oversized binary frame");
 
-    let received_b = recv_encrypted_payload(&mut client_b, Duration::from_millis(400)).await;
+    let received_b = recv_encrypted_payload(&mut client_b, NO_RECV_TIMEOUT).await;
     assert!(
         received_b.is_none(),
         "peer received forwarded data from oversized frame"
@@ -99,7 +116,7 @@ async fn invalid_first_frame_is_rejected() {
         .await
         .expect("send invalid first frame");
 
-    let closed = timeout(Duration::from_secs(2), read.next())
+    let closed = timeout(RECV_TIMEOUT, read.next())
         .await
         .expect("server should close websocket quickly");
     assert!(
@@ -134,7 +151,7 @@ async fn sender_identity_mismatch_is_dropped() {
         .await
         .expect("send spoofed payload");
 
-    let received_b = recv_encrypted_payload(&mut client_b, Duration::from_millis(500)).await;
+    let received_b = recv_encrypted_payload(&mut client_b, NO_RECV_TIMEOUT).await;
     assert!(
         received_b.is_none(),
         "peer received payload with mismatched sender identity"
@@ -159,7 +176,7 @@ async fn malformed_binary_frame_is_dropped_and_not_forwarded() {
         .await
         .expect("send malformed frame");
 
-    let received_b = recv_encrypted_payload(&mut client_b, Duration::from_millis(500)).await;
+    let received_b = recv_encrypted_payload(&mut client_b, NO_RECV_TIMEOUT).await;
     assert!(
         received_b.is_none(),
         "peer unexpectedly received forwarded data from malformed frame"
@@ -203,7 +220,7 @@ async fn unexpected_control_after_hello_is_ignored() {
         .await
         .expect("send encrypted payload after control frame");
 
-    let received_b = recv_encrypted_payload(&mut client_b, Duration::from_secs(2)).await;
+    let received_b = recv_encrypted_payload(&mut client_b, RECV_TIMEOUT).await;
     assert_eq!(received_b, Some(sender_payload));
 
     let _ = shutdown_tx.send(());
@@ -227,7 +244,7 @@ async fn room_capacity_rejects_eleventh_device() {
 
     let mut overflow_client =
         connect_client(&address, "room-cap", "dev-overflow", "Overflow").await;
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(OVERFLOW_SETTLE).await;
 
     let sender_payload = EncryptedPayload {
         sender_device_id: "dev-1".to_owned(),
@@ -243,12 +260,11 @@ async fn room_capacity_rejects_eleventh_device() {
         .expect("send encrypted payload from client in full room");
 
     for client in room_clients.iter_mut().skip(1) {
-        let received = recv_encrypted_payload(client, Duration::from_secs(2)).await;
+        let received = recv_encrypted_payload(client, RECV_TIMEOUT).await;
         assert_eq!(received, Some(sender_payload.clone()));
     }
 
-    let overflow_received =
-        recv_encrypted_payload(&mut overflow_client, Duration::from_millis(500)).await;
+    let overflow_received = recv_encrypted_payload(&mut overflow_client, NO_RECV_TIMEOUT).await;
     assert!(
         overflow_received.is_none(),
         "overflow client unexpectedly received encrypted payload"
@@ -302,7 +318,7 @@ async fn connect_client(
 
 async fn drain_non_encrypted(client: &mut TestClient) {
     loop {
-        match recv_next_wire_message(client, Duration::from_millis(60)).await {
+        match recv_next_wire_message(client, DRAIN_TIMEOUT).await {
             Some(WireMessage::Control(_)) => continue,
             Some(WireMessage::Encrypted(_)) => continue,
             None => break,

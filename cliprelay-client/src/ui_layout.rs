@@ -1,7 +1,7 @@
-/// UI sizing constants for the ClipRelay client.
-///
-/// With egui, DPI scaling is handled automatically. These constants define
-/// logical pixel sizes used for window defaults.
+//! UI sizing constants for the ClipRelay client.
+//!
+//! With egui, DPI scaling is handled automatically. These constants define
+//! logical pixel sizes used for window defaults.
 
 /// Default options window width (logical pixels).
 pub const OPTIONS_DEFAULT_W_PX: f32 = 680.0;

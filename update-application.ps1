@@ -1,3 +1,38 @@
+<#
+.SYNOPSIS
+    Automates the full release lifecycle for the ClipRelay project.
+
+.DESCRIPTION
+    Bumps the workspace version in Cargo.toml, refreshes Cargo.lock, runs the
+    quality-gate sequence (format check, lint, full tests), commits the version
+    bump, creates an annotated git tag, pushes everything to the remote, and
+    prunes all older release tags and GitHub Releases.
+
+    Use -DryRun to preview every planned action without touching files, git, or
+    remote hosting.
+
+.PARAMETER Version
+    Target semantic version in x.y.z format.  Prompted interactively if omitted.
+
+.PARAMETER Notes
+    Release notes text.  Multi-line input is accepted; terminate an interactive
+    session with a blank line.  Required non-empty.
+
+.PARAMETER Force
+    Allow overwriting an existing tag or releasing without a version increment.
+
+.PARAMETER DryRun
+    Describe every planned action without modifying files, git, or remote hosting.
+
+.EXAMPLE
+    .\update-application.ps1 -Version 1.2.3 -Notes "Bug fixes"
+
+.EXAMPLE
+    .\update-application.ps1 -DryRun
+
+.EXAMPLE
+    .\update-application.ps1 -Version 1.2.3 -Notes "Hotfix" -Force
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
@@ -29,11 +64,18 @@ function Write-ErrorLine([string]$Message) {
     Write-Host "[ERR]  $Message" -ForegroundColor Red
 }
 
-function Invoke-Git([string[]]$Arguments) {
-    & git @Arguments
+# IMPORTANT: Invoke-Git MUST be a simple (non-advanced) function using $args,
+# NOT [Parameter(ValueFromRemainingArguments)].  Adding any [Parameter()] or
+# [CmdletBinding()] attribute makes PowerShell bind its own common parameters
+# (-Debug, -Verbose, etc.) first; short flags like -d or -m that abbreviate a
+# common-parameter name are then silently swallowed and never forwarded to git.
+# Using $args has zero named-parameter binding, so every argument is forwarded verbatim.
+function Invoke-Git {
+    $output = & git @args 2>&1
     if ($LASTEXITCODE -ne 0) {
-        throw "git $($Arguments -join ' ') failed"
+        throw "git $($args -join ' ') failed (exit $LASTEXITCODE): $(($output | Out-String).Trim())"
     }
+    return $output
 }
 
 function Test-IsGitRepository {
@@ -46,7 +88,7 @@ function Get-WorkspaceRoot {
     return (Resolve-Path $scriptDir).Path
 }
 
-function Get-CurrentWorkspaceVersion([string]$CargoTomlPath) {
+function Get-PackageVersion([string]$CargoTomlPath) {
     $content = [System.IO.File]::ReadAllText($CargoTomlPath)
     $match = [regex]::Match($content, '(?ms)^\[workspace\.package\].*?^version\s*=\s*"(?<version>\d+\.\d+\.\d+)"')
     if (-not $match.Success) {
@@ -65,7 +107,7 @@ function Compare-SemVer([string]$Left, [string]$Right) {
     return 0
 }
 
-function Update-WorkspaceVersion([string]$CargoTomlPath, [string]$OldVersion, [string]$NewVersion) {
+function Update-PackageVersion([string]$CargoTomlPath, [string]$OldVersion, [string]$NewVersion) {
     $content = [System.IO.File]::ReadAllText($CargoTomlPath)
     $pattern = '(?m)^(version\s*=\s*")' + [regex]::Escape($OldVersion) + '("\s*$)'
     $replacement = '${1}' + $NewVersion + '${2}'
@@ -108,7 +150,7 @@ if ($DryRun) {
 }
 
 $cargoToml = Join-Path $workspaceRoot "Cargo.toml"
-$currentVersion = Get-CurrentWorkspaceVersion -CargoTomlPath $cargoToml
+$currentVersion = Get-PackageVersion -CargoTomlPath $cargoToml
 Write-Host ""
 Write-Host "Current version: " -NoNewline -ForegroundColor White
 Write-Host "$currentVersion" -ForegroundColor Yellow
@@ -200,6 +242,8 @@ try {
             Write-Host "- No version bump needed (same version re-release)"
         }
         Write-Host "- Run: cargo build --release"
+        Write-Host "- Run: cargo fmt -- --check"
+        Write-Host "- Run: cargo clippy -- -D warnings"
         Write-Host "- Run: cargo test"
         if ($isGitRepo) {
             if ($Version -ne $currentVersion) {
@@ -220,7 +264,7 @@ try {
 
     if ($Version -ne $currentVersion) {
         Write-Info "Updating workspace version in Cargo.toml"
-        Update-WorkspaceVersion -CargoTomlPath $cargoToml -OldVersion $currentVersion -NewVersion $Version
+        Update-PackageVersion -CargoTomlPath $cargoToml -OldVersion $currentVersion -NewVersion $Version
         $changedFiles.Add("Cargo.toml") | Out-Null
 
         Write-Info "Updating lockfile via cargo update --workspace"
@@ -268,6 +312,18 @@ try {
         throw "cargo build --release failed"
     }
 
+    Write-Info "Checking code formatting (cargo fmt -- --check)"
+    & cargo fmt -- --check
+    if ($LASTEXITCODE -ne 0) {
+        throw "cargo fmt -- --check failed: code is not formatted. Run 'cargo fmt' to fix."
+    }
+
+    Write-Info "Running linter (cargo clippy -- -D warnings)"
+    & cargo clippy -- -D warnings
+    if ($LASTEXITCODE -ne 0) {
+        throw "cargo clippy -- -D warnings failed: lint errors must be fixed before release."
+    }
+
     Write-Info "Running full test suite"
     & cargo test
     if ($LASTEXITCODE -ne 0) {
@@ -276,45 +332,45 @@ try {
 
     if ($Force -and -not [string]::IsNullOrWhiteSpace($existingTag)) {
         Write-WarnLine "Removing existing local tag $newTag due to -Force"
-        Invoke-Git @('tag', '-d', $newTag)
+        Invoke-Git tag -d $newTag
 
         $remoteTagExists = & git ls-remote --tags origin $newTag
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($remoteTagExists)) {
             Write-WarnLine "Removing existing remote tag $newTag due to -Force"
-            Invoke-Git @('push', 'origin', '--delete', $newTag)
+            Invoke-Git push origin --delete $newTag
         }
     }
 
     if ($changedFiles.Count -gt 0) {
         Write-Info "Staging release files"
-        Invoke-Git @('add', 'Cargo.toml')
+        Invoke-Git add Cargo.toml
         if (Test-Path $lockPath) {
-            Invoke-Git @('add', 'Cargo.lock')
+            Invoke-Git add Cargo.lock
         }
 
         Write-Info "Creating version bump commit"
-        Invoke-Git @('commit', '-m', "chore: bump version to $Version")
+        Invoke-Git commit -m "chore: bump version to $Version"
     } else {
         Write-WarnLine "No version files changed — skipping stage and commit."
     }
 
     Write-Info "Creating annotated tag $newTag"
-    Invoke-Git @('tag', '-a', $newTag, '-m', $Notes)
+    Invoke-Git tag -a $newTag -m $Notes
 
     Write-Info "Pushing commit and tag"
-    Invoke-Git @('push', 'origin', 'HEAD')
-    Invoke-Git @('push', 'origin', $newTag)
+    Invoke-Git push origin HEAD
+    Invoke-Git push origin $newTag
 
     Write-Info "Cleaning up older release tags"
     $allReleaseTags = (& git tag -l 'v*.*.*') | Where-Object { $_ -ne $newTag }
     foreach ($oldTag in $allReleaseTags) {
         if ([string]::IsNullOrWhiteSpace($oldTag)) { continue }
 
-        Invoke-Git @('tag', '-d', $oldTag)
+        Invoke-Git tag -d $oldTag
 
         $remoteTagExists = & git ls-remote --tags origin $oldTag
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($remoteTagExists)) {
-            Invoke-Git @('push', 'origin', '--delete', $oldTag)
+            Invoke-Git push origin --delete $oldTag
         }
 
         $ghAvailable = Get-Command gh -ErrorAction SilentlyContinue

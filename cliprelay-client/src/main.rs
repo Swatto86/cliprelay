@@ -47,7 +47,7 @@ mod windows_client {
     use sha2::{Digest, Sha256};
     use tokio::{runtime::Runtime, sync::mpsc, time::timeout};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
-    use tracing::{debug, error, info, warn};
+    use tracing::{debug, error, info, trace, warn};
     use tracing_subscriber::fmt::MakeWriter;
     use url::Url;
 
@@ -393,15 +393,15 @@ mod windows_client {
                     is_quit,
                     "MenuEvent received"
                 );
-                eprintln!(
-                    "[TRAY-DEBUG] MenuEvent received: id={:?}, quit_id={:?}, is_quit={}",
+                trace!(
+                    "[tray] MenuEvent received: id={:?}, quit_id={:?}, is_quit={}",
                     event.id, quit_id_dbg, is_quit
                 );
                 if is_quit {
                     quit_flag.store(true, Ordering::SeqCst);
                     ctx_menu.request_repaint();
                     debug!("quit_flag stored, repaint requested");
-                    eprintln!("[TRAY-DEBUG] quit_flag stored, repaint requested");
+                    trace!("[tray] quit_flag stored, repaint requested");
 
                     // Fallback: if the eframe event loop is dormant (hidden
                     // window), `request_repaint()` may never be honoured.
@@ -409,8 +409,8 @@ mod windows_client {
                     // quit flag cleanly, then force-exit.
                     std::thread::spawn(|| {
                         std::thread::sleep(std::time::Duration::from_millis(500));
-                        eprintln!(
-                            "[TRAY-DEBUG] quit fallback: event loop did not exit in time, forcing exit"
+                        trace!(
+                            "[tray] quit fallback: event loop did not exit in time, forcing exit"
                         );
                         std::process::exit(0);
                     });
@@ -421,7 +421,7 @@ mod windows_client {
             TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
                 // Log EVERY tray icon event for debugging.
                 debug!(tray_event = ?event, "TrayIconEvent received");
-                eprintln!("[TRAY-DEBUG] TrayIconEvent: {event:?}");
+                trace!("[tray] TrayIconEvent: {event:?}");
 
                 // Only respond to left-button Up and DoubleClick events.
                 // Ignoring Down events prevents double-toggling when the
@@ -439,12 +439,12 @@ mod windows_client {
                     }
                 );
                 debug!(should_toggle, "tray toggle decision");
-                eprintln!("[TRAY-DEBUG] should_toggle={should_toggle}");
+                trace!("[tray] should_toggle={should_toggle}");
                 if should_toggle {
                     toggle_flag.store(true, Ordering::SeqCst);
                     ctx_tray.request_repaint();
                     debug!("toggle_flag stored, repaint requested");
-                    eprintln!("[TRAY-DEBUG] toggle_flag stored, repaint requested");
+                    trace!("[tray] toggle_flag stored, repaint requested");
 
                     // Direct Win32 show/hide — bypasses the dormant eframe
                     // event loop that never calls update() for hidden windows.
@@ -453,7 +453,7 @@ mod windows_client {
                         let new_visible = !was_visible;
                         shared_visible.store(new_visible, Ordering::SeqCst);
                         unsafe { win32_set_window_visible(eframe_hwnd, new_visible) };
-                        eprintln!("[TRAY-DEBUG] Win32 ShowWindow: visible={new_visible}");
+                        trace!("[tray] Win32 ShowWindow: visible={new_visible}");
                     }
                 }
             }));
@@ -494,6 +494,11 @@ mod windows_client {
         Notifications,
     }
 
+    // `AppPhase::Running` is significantly larger than the other variants but
+    // `ClipRelayApp` is heap-allocated by eframe (stored as a Box<dyn App>), so
+    // the large stack frame concern does not apply at the call sites. Boxing the
+    // fields would add indirection without meaningful benefit.
+    #[allow(clippy::large_enum_variant)]
     enum AppPhase {
         ChooseRoom {
             saved_config: Option<SavedClientConfig>,
@@ -650,12 +655,12 @@ mod windows_client {
             };
             if eframe_hwnd == 0 {
                 warn!(
-                    "FindWindowW(\"ClipRelay\") returned NULL — tray/hotkey toggle will be degraded"
+                    "FindWindowW(\"ClipRelay\") returned NULL -- tray/hotkey toggle will be degraded"
                 );
-                eprintln!("[TRAY-DEBUG] FindWindowW returned NULL");
+                trace!("[tray] FindWindowW returned NULL");
             } else {
                 info!(eframe_hwnd, "eframe window HWND found");
-                eprintln!("[TRAY-DEBUG] eframe HWND = {eframe_hwnd}");
+                trace!("[tray] eframe HWND = {eframe_hwnd}");
             }
 
             // Shared visibility state — OS callbacks mutate this directly.
@@ -671,10 +676,10 @@ mod windows_client {
             );
             if tray.is_some() {
                 info!("TrayState created successfully");
-                eprintln!("[TRAY-DEBUG] TrayState created successfully");
+                trace!("[tray] TrayState created successfully");
             } else {
-                error!("TrayState creation FAILED — tray icon will not appear");
-                eprintln!("[TRAY-DEBUG] TrayState creation FAILED");
+                error!("TrayState creation FAILED -- tray icon will not appear");
+                trace!("[tray] TrayState creation FAILED");
             }
             let autostart_enabled = windows_autostart_is_enabled();
 
@@ -710,18 +715,18 @@ mod windows_client {
             let hk_visible = self.shared_visible.clone();
             GlobalHotKeyEvent::set_event_handler(Some(move |event: GlobalHotKeyEvent| {
                 debug!(hotkey_event = ?event, "GlobalHotKeyEvent received");
-                eprintln!("[HOTKEY-DEBUG] GlobalHotKeyEvent: {event:?}");
-                // Only respond to Pressed — ignore Released to prevent the
+                trace!("[hotkey] GlobalHotKeyEvent: {event:?}");
+                // Only respond to Pressed -- ignore Released to prevent the
                 // flag from being set twice (which would double-toggle the
                 // window back to its original state).
                 if event.state == global_hotkey::HotKeyState::Released {
-                    eprintln!("[HOTKEY-DEBUG] ignoring Released event");
+                    trace!("[hotkey] ignoring Released event");
                     return;
                 }
                 hk_flag.store(true, Ordering::SeqCst);
                 ctx_hk.request_repaint();
                 debug!("hotkey_toggle_flag stored, repaint requested");
-                eprintln!("[HOTKEY-DEBUG] hotkey_toggle_flag stored, repaint requested");
+                trace!("[hotkey] hotkey_toggle_flag stored, repaint requested");
 
                 // Direct Win32 show/hide — bypasses the dormant eframe
                 // event loop that never calls update() for hidden windows.
@@ -730,7 +735,7 @@ mod windows_client {
                     let new_visible = !was_visible;
                     hk_visible.store(new_visible, Ordering::SeqCst);
                     unsafe { win32_set_window_visible(hk_hwnd, new_visible) };
-                    eprintln!("[HOTKEY-DEBUG] Win32 ShowWindow: visible={new_visible}");
+                    trace!("[hotkey] Win32 ShowWindow: visible={new_visible}");
                 }
             }));
 
@@ -1128,8 +1133,8 @@ mod windows_client {
             // atomic and issues the corresponding ViewportCommands so that
             // eframe's own visibility tracking stays consistent.
             if self.tray_quit_requested.load(Ordering::SeqCst) {
-                info!("update loop: tray_quit_requested=true — exiting");
-                eprintln!("[TRAY-DEBUG] update loop: tray_quit_requested=true — exiting");
+                info!("update loop: tray_quit_requested=true - exiting");
+                trace!("[tray] update loop: tray_quit_requested=true - exiting");
                 if let Err(err) = ui_state::save_ui_state_with_retry(&self.ui_state) {
                     warn!("failed to save ui_state on quit: {err}");
                 }
@@ -1149,8 +1154,8 @@ mod windows_client {
                     actual_visible,
                     "syncing toggle from shared_visible"
                 );
-                eprintln!(
-                    "[TRAY-DEBUG] update loop: tray_toggle={tray_toggle}, hk_toggle={hk_toggle}, \
+                trace!(
+                    "[tray] update loop: tray_toggle={tray_toggle}, hk_toggle={hk_toggle}, \
                      window_visible={} -> {actual_visible}",
                     *window_visible
                 );
@@ -1406,23 +1411,23 @@ mod windows_client {
                     && let Some(path) = rfd::FileDialog::new()
                         .set_title("Select file to send")
                         .pick_file()
-                    {
-                        history.push_front(ActivityEntry {
-                            ts_unix_ms: now_unix_ms(),
-                            direction: ActivityDirection::Sent,
-                            peer_device_id: "room".to_owned(),
-                            kind: "file".to_owned(),
-                            summary: format!("{}", path.display()),
-                        });
-                        while history.len() > MAX_HISTORY_ENTRIES {
-                            history.pop_back();
-                        }
-                        save_history(history);
-
-                        let _ = runtime_cmd_tx.send(RuntimeCommand::SendFile(path.clone()));
-                        *toast_message =
-                            Some((format!("Queued file: {}", path.display()), now_unix_ms()));
+                {
+                    history.push_front(ActivityEntry {
+                        ts_unix_ms: now_unix_ms(),
+                        direction: ActivityDirection::Sent,
+                        peer_device_id: "room".to_owned(),
+                        kind: "file".to_owned(),
+                        summary: format!("{}", path.display()),
+                    });
+                    while history.len() > MAX_HISTORY_ENTRIES {
+                        history.pop_back();
                     }
+                    save_history(history);
+
+                    let _ = runtime_cmd_tx.send(RuntimeCommand::SendFile(path.clone()));
+                    *toast_message =
+                        Some((format!("Queued file: {}", path.display()), now_unix_ms()));
+                }
             });
         }
 
@@ -1984,12 +1989,12 @@ mod windows_client {
 
     /// Map the raw connection status string to a tray traffic-light colour.
     ///
-    /// * **Green**  — WebSocket connection to the relay server is active
-    ///                (`"Connected"`), giving the user clear confirmation that
-    ///                the network path is working.  Room-key readiness is a
-    ///                secondary concern shown in the status-bar text and tooltip.
-    /// * **Amber**  — Transitional states: starting, connecting, reconnecting.
-    /// * **Red**    — An error has occurred and the app cannot reach the server.
+    /// * **Green** -- WebSocket connection to the relay server is active
+    ///   (`"Connected"`), giving the user clear confirmation that the network
+    ///   path is working. Room-key readiness is a secondary concern shown in
+    ///   the status-bar text and tooltip.
+    /// * **Amber** -- Transitional states: starting, connecting, reconnecting.
+    /// * **Red** -- An error has occurred and the app cannot reach the server.
     fn compute_tray_status(connection_status: &str, _room_key_ready: bool) -> TrayStatus {
         if connection_status.starts_with("Error") {
             return TrayStatus::Red;

@@ -27,7 +27,7 @@ ClipRelay synchronizes clipboard text across online devices in a shared room usi
 - `cliprelay-client/build.rs`: Windows resource embedding (icon via winres, manifest via MSVC linker) ensuring taskbar icon and Common Controls v6 support.
 - `cliprelay-client/tests/ui_state.rs`: regression tests for window placement persistence helpers.
 - `cliprelay-client/tests/windows_manifest.rs`: verifies the release binary embeds the Win32 manifest.
-- `update-application.ps1`: release automation script (version bump, validation, tagging, push, old-tag cleanup) with `-DryRun` preview mode.
+- `update-application.ps1`: release automation script (version bump, quality-gate sequence: fmt-check -> clippy -> full tests, commit, tagging, push, old-tag cleanup) with `-DryRun` preview mode and `-Force` override.
 - `docs/HOW_IT_WORKS.md`: end-to-end architecture + user guide + cloud ops notes (Caddy + systemd).
 - `deploy/cliprelay-relay.service`: systemd unit for running the relay on Linux hosts.
 - `deploy/install-relay-systemd.sh`: idempotent installer that copies the relay binary, installs env/service files, and enables the service.
@@ -74,11 +74,58 @@ The Options tab exposes two session-management actions without requiring an app 
 
 ## Build/Test/Run
 - Build: `cargo check`
+- Format check: `cargo fmt --all -- --check`
+- Lint (deny warnings): `cargo clippy -p cliprelay-core -p cliprelay-relay -- -D warnings`
+- Lint (client, Windows): `cargo clippy -p cliprelay-client -- -D warnings`
 - Core unit tests: `cargo test -p cliprelay-core`
 - Client tests: `cargo test -p cliprelay-client`
 - Relay E2E: `cargo test -p cliprelay-relay --test e2e_relay`
-- CI workflow: `.github/workflows/ci.yml` (runs check + core tests + relay E2E on `main` pushes and pull requests)
-- Release workflow: `.github/workflows/release.yml` (runs on `v*.*.*` tags and publishes Linux/Windows relay binaries)
+- CI workflow: `.github/workflows/ci.yml` (Ubuntu: fmt, clippy, check, core+relay tests; Windows: client clippy + client tests)
+- Release workflow: `.github/workflows/release.yml` (runs on `v*.*.*` tags and `workflow_dispatch`; publishes Linux/Windows relay+client binaries)
+
+## Debug / Diagnostic Mode
+
+All observability is routed through the `tracing` subscriber governed by `RUST_LOG`.
+
+### Relay (`cliprelay-relay`)
+
+Activation: set `RUST_LOG` before launching.
+
+```
+RUST_LOG=debug ./cliprelay-relay
+RUST_LOG=trace ./cliprelay-relay   # maximum verbosity (connection lifecycle, frame routing)
+```
+
+Output: **stderr** (structured text via `tracing-subscriber fmt`).
+
+### Client (`cliprelay-client`)
+
+The client is a Windows GUI app (`windows_subsystem = "windows"`); stderr is not attached to a
+console by default. Two environment variables control debug output:
+
+| Variable | Effect |
+|---|---|
+| `RUST_LOG=<level>` | Sets the tracing filter (e.g. `info`, `debug`, `trace`). Same semantics as the relay. |
+| `CLIPRELAY_DEBUG=1` | Allocates a Win32 console window so that tracing output becomes visible when the app is launched from a script or shortcut. |
+
+Recommended for diagnostics:
+
+```powershell
+$env:RUST_LOG = "trace"
+$env:CLIPRELAY_DEBUG = "1"
+.\cliprelay-client.exe
+```
+
+Log file location: `%LOCALAPPDATA%\ClipRelay\cliprelay-client.log`
+(fallback: `%TEMP%\ClipRelay\cliprelay-client.log` if the primary path is not writable).
+
+Trace-level events cover:
+- Tray icon OS-callback lifecycle (click events, Win32 ShowWindow calls)
+- Global hotkey press/release filtering
+- Window visibility state transitions
+- Room-key negotiation steps
+
+**Debug output is disabled by default in release builds** (no overhead unless `RUST_LOG` is set).
 
 ## Configuration Ownership
 - Relay bind address: CLI flag on relay.
