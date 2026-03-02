@@ -111,6 +111,8 @@ pub enum CoreError {
     UnsupportedMessageType(u8),
     #[error("serialization error: {0}")]
     Serialization(String),
+    #[error("encryption failed")]
+    EncryptionFailed,
     #[error("decryption failed")]
     DecryptionFailed,
     #[error("sender/counter mismatch in decrypted payload")]
@@ -163,7 +165,7 @@ pub fn encrypt_clipboard_event(
                 aad: b"cliprelay:v1",
             },
         )
-        .map_err(|_| CoreError::DecryptionFailed)?;
+        .map_err(|_| CoreError::EncryptionFailed)?;
 
     Ok(EncryptedPayload {
         sender_device_id: event.sender_device_id.clone(),
@@ -335,7 +337,12 @@ fn compute_device_list_hash(device_ids: &[DeviceId]) -> [u8; 32] {
     let mut sorted = device_ids.to_vec();
     sorted.sort();
     let mut hasher = Sha256::new();
-    for device_id in sorted {
+    for device_id in &sorted {
+        // Length-prefix each ID so that different splits of the same character
+        // sequence (e.g. ["a","bc"] vs ["ab","c"]) produce distinct hash inputs
+        // and never collide.
+        let len = (device_id.len() as u32).to_le_bytes();
+        hasher.update(len);
         hasher.update(device_id.as_bytes());
     }
     hasher.finalize().into()
@@ -402,6 +409,19 @@ mod tests {
         assert_ne!(n1, n2);
         assert_ne!(n1, n3);
         assert_ne!(n2, n3);
+    }
+
+    #[test]
+    fn device_list_hash_collision_prevention() {
+        // Before the length-prefix fix, ["a", "bc"] and ["ab", "c"] both
+        // serialised to the byte sequence b"abc", producing the same salt and
+        // therefore the same room key.  Verify they are now distinct.
+        let key1 = derive_room_key("room", &["a".to_owned(), "bc".to_owned()]).unwrap();
+        let key2 = derive_room_key("room", &["ab".to_owned(), "c".to_owned()]).unwrap();
+        assert_ne!(
+            key1, key2,
+            "different device-ID splits must produce distinct room keys"
+        );
     }
 
     #[test]

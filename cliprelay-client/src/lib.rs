@@ -9,6 +9,12 @@ pub mod autostart {
     };
 
     const RUN_SUBKEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    /// Upper bound on the autostart command string stored in the registry.
+    /// A reasonable autostart entry is under 1 KiB; 32 KiB is a generous
+    /// safety margin that prevents a malicious or corrupted value from
+    /// causing an out-of-memory allocation (size_bytes is a u32, so the
+    /// unchecked allocation could be up to ~4 GiB).
+    const MAX_RUN_VALUE_BYTES: u32 = 32 * 1024;
 
     #[derive(Debug)]
     pub enum AutostartError {
@@ -124,6 +130,11 @@ pub mod autostart {
         if size_bytes == 0 {
             unsafe { RegCloseKey(key) };
             return Ok(Some(String::new()));
+        }
+
+        if size_bytes > MAX_RUN_VALUE_BYTES {
+            unsafe { RegCloseKey(key) };
+            return Err(AutostartError::ValueTooLarge);
         }
 
         let mut buf: Vec<u8> = vec![0u8; size_bytes as usize];

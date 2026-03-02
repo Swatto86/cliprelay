@@ -139,3 +139,8 @@ Trace-level events cover:
 - Replay counters are monotonic per sender on receiving client.
 - WebSocket sessions must send keepalive pings to survive reverse-proxy idle timeouts.
 - **egui DPI**: The client uses eframe/egui which handles DPI scaling automatically. No manual DPI conversion is needed. UI sizing constants in `ui_layout.rs` are logical pixel `f32` values.
+- **Room key isolation**: `compute_device_list_hash` uses a length-prefixed encoding per device ID (4-byte LE length then UTF-8 bytes) so that different splits of the same character sequence (e.g. `["a","bc"]` vs `["ab","c"]`) produce distinct salts and room keys never collide across rooms.
+- **`CoreError::EncryptionFailed`** and **`CoreError::DecryptionFailed`** are distinct error variants. `encrypt_clipboard_event` returns `EncryptionFailed` on cipher failure; `decrypt_clipboard_event` returns `DecryptionFailed`. Callers must handle both.
+- **Room code trimming**: `save_saved_config` trims leading/trailing whitespace from `room_code`, `server_url`, and `device_name` before persisting, so all peers using the same logical room code derive the same room key regardless of incidental whitespace entered in the UI.
+- **File name safety**: `sanitize_file_name` truncates at a UTF-8 char boundary via `str::floor_char_boundary` to prevent panics on multibyte sequences. Receiving files with duplicate names returns an error after 200 dedup attempts rather than silently overwriting.
+- **Registry value size**: `run_key_get_value_string` rejects registry values > `MAX_RUN_VALUE_BYTES` (32 KiB) before allocating to prevent OOM from malformed/corrupted autostart entries.

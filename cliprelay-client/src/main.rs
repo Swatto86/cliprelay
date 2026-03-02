@@ -2144,12 +2144,21 @@ mod windows_client {
     }
 
     fn save_saved_config(cfg: &SavedClientConfig) -> Result<(), String> {
-        validate_saved_config(cfg)?;
+        // Trim whitespace from all string fields before persisting so that a
+        // room code entered as "  my-room  " on one device and "my-room" on
+        // another both derive the same room key.
+        let cfg = SavedClientConfig {
+            server_url: cfg.server_url.trim().to_owned(),
+            room_code: cfg.room_code.trim().to_owned(),
+            device_name: cfg.device_name.trim().to_owned(),
+            last_counter: cfg.last_counter,
+        };
+        validate_saved_config(&cfg)?;
         const MAX_ATTEMPTS: u32 = 3;
         const BACKOFF_BASE_MS: u64 = 50;
         let path = client_config_path();
         let tmp_path = path.with_extension("json.tmp");
-        let payload = serde_json::to_string_pretty(cfg).map_err(|err| err.to_string())?;
+        let payload = serde_json::to_string_pretty(&cfg).map_err(|err| err.to_string())?;
 
         for attempt in 1..=MAX_ATTEMPTS {
             let result: Result<(), String> = (|| {
@@ -2370,8 +2379,12 @@ mod windows_client {
                 out.push(ch);
             }
         }
-        if out.len() > 128 {
-            out.truncate(128);
+        // Truncate at a safe UTF-8 char boundary so we never split a multibyte
+        // codepoint, which would cause `String::truncate` to panic.
+        const MAX_FILE_NAME_BYTES: usize = 128;
+        if out.len() > MAX_FILE_NAME_BYTES {
+            let boundary = out.floor_char_boundary(MAX_FILE_NAME_BYTES);
+            out.truncate(boundary);
         }
         out
     }
@@ -2412,6 +2425,7 @@ mod windows_client {
                 .and_then(|s| s.to_str())
                 .unwrap_or("file");
             let ext = safe_path.extension().and_then(|s| s.to_str());
+            let mut found_unique = false;
             for i in 1..=200 {
                 let candidate = if let Some(ext) = ext {
                     base.join(format!("{stem} ({i}).{ext}"))
@@ -2420,8 +2434,14 @@ mod windows_client {
                 };
                 if !candidate.exists() {
                     dest = candidate;
+                    found_unique = true;
                     break;
                 }
+            }
+            if !found_unique {
+                return Err(format!(
+                    "could not find a unique filename for '{safe}' after 200 attempts"
+                ));
             }
         }
         std::fs::copy(temp_path, &dest).map_err(|e| e.to_string())?;
@@ -3447,6 +3467,29 @@ mod windows_client {
     }
 
     // ─── Tests ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn sanitize_file_name_does_not_panic_on_long_multibyte_name() {
+        // A name of 100 × 3-byte CJK characters (300 bytes total) would
+        // previously cause String::truncate(128) to panic because 128 falls
+        // mid-codepoint.  After the floor_char_boundary fix the result must:
+        //   - be non-empty
+        //   - be at most 128 bytes
+        //   - be valid UTF-8 (String is always valid UTF-8)
+        let name = "あ".repeat(100); // 100 × 3 bytes = 300 bytes
+        let result = sanitize_file_name(&name);
+        assert!(!result.is_empty());
+        assert!(result.len() <= 128, "result is {} bytes", result.len());
+    }
+
+    #[test]
+    fn sanitize_file_name_replaces_illegal_chars() {
+        let result = sanitize_file_name("foo/bar\\baz:*.txt");
+        assert!(!result.contains('/'));
+        assert!(!result.contains('\\'));
+        assert!(!result.contains(':'));
+        assert!(!result.contains('*'));
+    }
 
     #[test]
     fn device_id_from_is_deterministic_and_device_name_scoped() {
