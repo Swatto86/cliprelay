@@ -164,7 +164,7 @@ This client is **manual-send only**:
 
 - The Send window also has **Send file…** to transmit an arbitrary file.
 - Files are **chunked** and sent end-to-end encrypted through the relay.
-- Max file size is **5 MiB** (hard cap).
+- Max file size is **50 MiB** (hard cap).
 - On the receiving machine, the popup shows a preview; click **Save** to write the file under `Downloads\ClipRelay`.
 
 ## 8) Relay Behavior (What It Does and Doesn’t Do)

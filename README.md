@@ -2,7 +2,7 @@
 
 ClipRelay is an end-to-end encrypted, relay-based clipboard and file sync tool.
 
-- Sync **clipboard text** and **files up to 5 MiB** between devices that share a room code.
+- Sync **clipboard text** and **files up to 50 MiB** between devices that share a room code.
 - Clients connect outbound over WebSocket (`ws://` or `wss://`) to a relay.
 - All payloads are encrypted client-side with XChaCha20-Poly1305 — the relay only forwards opaque blobs and cannot decrypt anything.
 - Windows clients use an egui/eframe tray-first UI with red/amber/green tray status indicators, a tabbed single-window interface (Send | Options | Notifications), and automatic DPI scaling.
@@ -41,7 +41,7 @@ Replay protection:
 | Resource | Limit |
 |---|---|
 | Clipboard text | 256 KiB |
-| File transfer | 5 MiB |
+| File transfer | 50 MiB |
 | Relay message frame | 300 KiB (files are chunked) |
 | Devices per room | 10 |
 
@@ -249,7 +249,7 @@ The systemd unit includes hardening out of the box:
 ### Sending files
 
 1. Open the Send window
-2. Click **Send file…** and pick a file (max **5 MiB**)
+2. Click **Send file…** and pick a file (max **50 MiB**)
 3. The file is chunked, encrypted, and sent through the relay
 4. The receiver gets a popup with a preview and can click **Save** — files are saved to `Downloads\ClipRelay`
 
