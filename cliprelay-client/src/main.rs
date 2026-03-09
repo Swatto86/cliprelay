@@ -96,10 +96,10 @@ mod windows_client {
     const MAX_SERVER_URL_LEN: usize = 2048;
     const MAX_DEVICE_NAME_LEN: usize = 128;
 
-    const DEFAULT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
+    const DEFAULT_MAX_FILE_BYTES: u64 = 50 * 1024 * 1024;
     const MAX_INFLIGHT_TRANSFERS: usize = 8;
-    const TRANSFER_TIMEOUT_MS: u64 = 120_000;
-    const MAX_TOTAL_CHUNKS: u32 = 256;
+    const TRANSFER_TIMEOUT_MS: u64 = 600_000;
+    const MAX_TOTAL_CHUNKS: u32 = 1024;
     const FILE_CHUNK_RAW_BYTES: usize = 64 * 1024;
     const MAX_NOTIFICATIONS: usize = 20;
     const MAX_HISTORY_ENTRIES: usize = 200;

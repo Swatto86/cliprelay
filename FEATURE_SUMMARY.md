@@ -35,7 +35,7 @@ When you launch the Windows client **without** a `--room-code` CLI argument, you
 1. **Ensure Connected**: Tray icon must be **Green** (room key ready)
 2. **Open Send Window**: Double-click the tray icon  
 3. **Click "Send File..."** button
-4. **Select File**: File dialog opens - choose any file up to **5MB**
+4. **Select File**: File dialog opens - choose any file up to **50 MB**
 5. **File Queued**: Tray notification confirms file queued for sending
 6. **Automatic Transfer**: File is chunked (64KB chunks), encrypted, and sent to all devices in the room
 
@@ -48,7 +48,7 @@ When you launch the Windows client **without** a `--room-code` CLI argument, you
 
 ### Technical Details
 
-- **File Size Limit**: 5MB (5,242,880 bytes)
+- **File Size Limit**: 50 MB (52,428,800 bytes)
 - **Chunk Size**: 64KB per chunk
 - **Encryption**: End-to-end encrypted with XChaCha20-Poly1305
 - **MIME Type**: `application/x-cliprelay-file-chunk+json;base64`
@@ -59,14 +59,14 @@ When you launch the Windows client **without** a `--room-code` CLI argument, you
 
 ✅ Send any file type (binary or text)  
 ✅ Multiple devices receive the same file simultaneously  
-✅ Files larger than clipboard limit (up to 5MB)  
+✅ Files larger than clipboard limit (up to 50 MB)  
 ✅ Progress indication via tray notifications  
 ✅ Secure transfer through relay (relay cannot decrypt)  
 
 ### Error Handling
 
 - Empty files rejected
-- Files over 5MB rejected with clear error message  
+- Files over 50 MB rejected with clear error message  
 - Network disconnection during transfer shows error notification
 - Room key not ready blocks send button until encryption possible
 - Invalid file paths or permission errors reported via tray notification
@@ -124,7 +124,7 @@ When you launch the Windows client **without** a `--room-code` CLI argument, you
 .\target\release\ClipRelay.exe --room-code test-files --device-name PC2
 
 # Wait for both to show GREEN tray icon
-# On PC1: Double-click tray → "Send File..." → Choose file ≤5MB
+# On PC1: Double-click tray → "Send File..." → Choose file ≤50MB
 # On PC2: Popup appears → Click "Save"
 # File saved to Downloads\ClipRelay\
 ```
@@ -133,7 +133,7 @@ When you launch the Windows client **without** a `--room-code` CLI argument, you
 
 Potential improvements (not implemented):
 - [ ] File sending progress bar during large transfers
-- [ ] Configurable file size limit (currently hardcoded 5MB)
+- [ ] Configurable file size limit (currently hardcoded 50 MB)
 - [ ] Drag-and-drop files onto send window
 - [ ] File history list in UI
 - [ ] Custom save location picker
