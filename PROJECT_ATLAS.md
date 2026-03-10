@@ -132,6 +132,15 @@ Trace-level events cover:
 - Client room/server/client identity: CLI flags on client (`--server-url`, `--room-code`, `--client-name`).
 - Saved client config: `%LOCALAPPDATA%\ClipRelay\config.json` (field `device_name` preserved for backward compatibility).
 
+## File Transfer Limits
+- Maximum file size: 200 MiB (`DEFAULT_MAX_FILE_BYTES` in client).
+- Each file is split into 64 KiB raw chunks (`FILE_CHUNK_RAW_BYTES`), base64-encoded (~87 KiB), wrapped in a JSON envelope, encrypted, then sent as individual WebSocket binary frames.
+- Maximum chunks per transfer: 4096 (`MAX_TOTAL_CHUNKS`), supporting files up to 256 MiB at current chunk size.
+- Client paces chunk sends at 5 ms intervals (`CHUNK_PACING`) to avoid overwhelming the relay's rate limiter.
+- Relay rate limiter: token bucket with burst capacity 400 and refill rate 200/sec, allowing sustained throughput of ~12.5 MB/s.
+- Maximum concurrent in-flight transfers on the receiving side: 8 (`MAX_INFLIGHT_TRANSFERS`).
+- Transfer timeout: 10 minutes (`TRANSFER_TIMEOUT_MS`).
+
 ## Critical Invariants
 - Relay forwards only opaque encrypted payloads and never decrypts clipboard text.
 - Room size must not exceed `MAX_DEVICES_PER_ROOM`.

@@ -185,7 +185,7 @@ async fn handle_socket(
 
     info!("device {} joined room {}", device_id, room_id);
 
-    let mut rate_limiter = TokenBucket::new(24.0, 12.0);
+    let mut rate_limiter = TokenBucket::new(400.0, 200.0);
 
     while let Some(next_message) = ws_receiver.next().await {
         let message = match next_message {

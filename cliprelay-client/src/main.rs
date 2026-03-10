@@ -96,11 +96,12 @@ mod windows_client {
     const MAX_SERVER_URL_LEN: usize = 2048;
     const MAX_DEVICE_NAME_LEN: usize = 128;
 
-    const DEFAULT_MAX_FILE_BYTES: u64 = 50 * 1024 * 1024;
+    const DEFAULT_MAX_FILE_BYTES: u64 = 200 * 1024 * 1024;
     const MAX_INFLIGHT_TRANSFERS: usize = 8;
     const TRANSFER_TIMEOUT_MS: u64 = 600_000;
-    const MAX_TOTAL_CHUNKS: u32 = 1024;
+    const MAX_TOTAL_CHUNKS: u32 = 4096;
     const FILE_CHUNK_RAW_BYTES: usize = 64 * 1024;
+    const CHUNK_PACING: std::time::Duration = std::time::Duration::from_millis(5);
     const MAX_NOTIFICATIONS: usize = 20;
     const MAX_HISTORY_ENTRIES: usize = 200;
 
@@ -3149,6 +3150,10 @@ mod windows_client {
             let payload =
                 encrypt_clipboard_event(&room_key, &plaintext).map_err(|e| e.to_string())?;
             network_send_clipboard(network_send_tx, payload).await;
+
+            if chunk_index + 1 < total_chunks {
+                tokio::time::sleep(CHUNK_PACING).await;
+            }
         }
 
         let _ = ui_event_tx.send(UiEvent::LastSent(now_unix_ms()));
