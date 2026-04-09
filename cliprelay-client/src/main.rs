@@ -50,7 +50,8 @@ mod windows_client {
     use tracing::{debug, error, info, trace, warn};
     use tracing_subscriber::fmt::MakeWriter;
     use url::Url;
-
+    use winrt_notification::{Duration as ToastDuration, Toast};
+    
     use cliprelay_client::autostart;
     use cliprelay_client::ui_state::{self, SavedUiState};
 
@@ -1082,8 +1083,16 @@ mod windows_client {
                                     format!("Clipboard auto-applied from {name}"),
                                     now_unix_ms(),
                                 ));
+                                // New system toast for auto-apply
+                                let preview = preview_text(&text, 100);
+                                show_system_notification("Clipboard auto-applied", &format!("From {}: {}", name, preview));
                             }
                         } else {
+                            // New system toast for manual notification
+                            let peer_name = resolve_peer_name(peers, &sender_device_id);
+                            let preview = preview_text(&text, 100);
+                            show_system_notification("New clipboard received", &format!("From {}: {}", peer_name, preview));
+                            
                             push_notification(
                                 notifications,
                                 Notification::Text {
@@ -1116,6 +1125,9 @@ mod windows_client {
                             history.pop_back();
                         }
                         save_history(history);
+// New system toast for file
+                        let peer_name = resolve_peer_name(peers, &sender_device_id);
+                        show_system_notification("New file received", &format!("{} ({size_bytes} bytes) from {}", file_name, peer_name));
 
                         let preview = format!(
                             "File: {file_name}\nSize: {size_bytes} bytes\n\n\
@@ -2079,6 +2091,16 @@ mod windows_client {
     fn windows_set_autostart_enabled(enabled: bool) -> Result<(), String> {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         autostart::set_enabled(&exe, "ClipRelay", enabled).map_err(|e| e.to_string())
+    }
+
+    fn show_system_notification(title: &str, body: &str) {
+        let toast = Toast::new("ClipRelay")
+            .duration(ToastDuration::Short)
+            .title(title)
+            .text1(body);
+        if let Err(e) = toast.show() {
+            eprintln!("Failed to show system notification: {}", e);
+        }
     }
 
     // ─── RepaintingSender ──────────────────────────────────────────────────────
@@ -3509,3 +3531,4 @@ mod windows_client {
         assert_ne!(a1, c);
     }
 }
+
